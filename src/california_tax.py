@@ -326,6 +326,8 @@ class CaliforniaTaxCalculator:
                 data=schedule_a_data,
                 agi=ca_agi,
                 ca_standard_deduction=ca_std,
+                filing_status=self.filing_status,
+                tax_year=self.tax_year,
             )
             deduction_amount = schedule_a_result.deduction_amount
             deduction_method = "itemized" if schedule_a_result.use_itemized else "standard"

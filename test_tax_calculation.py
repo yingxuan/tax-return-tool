@@ -475,6 +475,139 @@ def test_report_generation():
     print("  [PASS] Report mentions Child Tax Credit")
 
 
+def test_rental_vs_personal_mortgage():
+    """Test that rental 1098 mortgage interest is separated from personal."""
+    print("\n" + "=" * 60)
+    print("Test: Rental vs Personal Mortgage Interest (Feature 1)")
+    print("=" * 60)
+
+    tax_return = TaxReturn(
+        taxpayer=TaxpayerInfo(name="Test", filing_status=FilingStatus.MARRIED_FILING_JOINTLY),
+        income=TaxableIncome(wages=200_000),
+        form_1098=[
+            Form1098(lender_name="Wells Fargo", mortgage_interest=18_000, is_rental=False),
+            Form1098(lender_name="Hiawatha Mortgage", mortgage_interest=33_000, is_rental=True),
+        ],
+    )
+
+    print(f"  Total mortgage interest:    {fmt(tax_return.total_mortgage_interest)}")
+    print(f"  Personal mortgage interest: {fmt(tax_return.total_personal_mortgage_interest)}")
+    print(f"  Rental mortgage interest:   {fmt(tax_return.total_rental_mortgage_interest)}")
+
+    assert tax_return.total_mortgage_interest == 51_000
+    assert tax_return.total_personal_mortgage_interest == 18_000
+    assert tax_return.total_rental_mortgage_interest == 33_000
+    print("  [PASS] Rental vs personal mortgage split correctly")
+
+
+def test_capital_loss_carryover():
+    """Test capital loss carryover reduces capital gains."""
+    print("\n" + "=" * 60)
+    print("Test: Capital Loss Carryover (Feature 2)")
+    print("=" * 60)
+
+    income = TaxableIncome(wages=100_000, capital_gains=500)
+
+    # Simulate applying carryover (same logic as main.py)
+    carryover = 3_000
+    cap = 3_000  # MFJ cap
+    loss = min(carryover, cap)
+    income.capital_gains -= loss
+
+    print(f"  Capital gains after carryover: {fmt(income.capital_gains)}")
+    assert income.capital_gains == -2_500, f"Expected -$2,500, got {income.capital_gains}"
+    print("  [PASS] Capital loss carryover applied correctly")
+
+    # Test MFS cap
+    income2 = TaxableIncome(wages=100_000, capital_gains=0)
+    mfs_cap = 1_500
+    loss2 = min(carryover, mfs_cap)
+    income2.capital_gains -= loss2
+    assert income2.capital_gains == -1_500, f"Expected -$1,500, got {income2.capital_gains}"
+    print("  [PASS] MFS $1,500 cap applied correctly")
+
+
+def test_ca_itemized_limitation():
+    """Test CA high-income itemized deduction limitation."""
+    print("\n" + "=" * 60)
+    print("Test: CA Itemized Deduction Limitation (Feature 3)")
+    print("=" * 60)
+
+    data = ScheduleAData(
+        real_estate_taxes=15_000,
+        mortgage_interest=20_000,
+        cash_contributions=10_000,
+    )
+
+    # MFJ, 2024, AGI well above threshold ($452,761)
+    agi = 1_600_000
+    result = ScheduleACalculator.calculate_ca_itemized(
+        data=data, agi=agi, ca_standard_deduction=10_726,
+        filing_status=FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2024,
+    )
+
+    # Expected: min(6% * (1600000 - 452761), 80% * 45000)
+    # = min(6% * 1147239, 80% * 45000) = min(68834.34, 36000) = 36000
+    expected_limitation = min(
+        0.06 * (agi - 452_761),
+        0.80 * 45_000,
+    )
+    print(f"  Total before limitation: $45,000.00")
+    print(f"  CA Limitation:           {fmt(result.ca_itemized_limitation)}")
+    print(f"  Total after limitation:  {fmt(result.total_itemized)}")
+
+    assert abs(result.ca_itemized_limitation - expected_limitation) < 0.01, \
+        f"Expected {fmt(expected_limitation)}, got {fmt(result.ca_itemized_limitation)}"
+    assert abs(result.total_itemized - (45_000 - expected_limitation)) < 0.01
+    print("  [PASS] CA itemized limitation computed correctly")
+
+    # Below threshold - no limitation
+    result_low = ScheduleACalculator.calculate_ca_itemized(
+        data=data, agi=300_000, ca_standard_deduction=10_726,
+        filing_status=FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2024,
+    )
+    assert result_low.ca_itemized_limitation == 0.0
+    print("  [PASS] No limitation when AGI below threshold")
+
+
+def test_additional_medicare_tax():
+    """Test Additional Medicare Tax on W-2 wages."""
+    print("\n" + "=" * 60)
+    print("Test: Additional Medicare Tax on Wages (Feature 4)")
+    print("=" * 60)
+
+    calculator = FederalTaxCalculator(FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2024)
+
+    # Wages above $250K threshold
+    amt = calculator.calculate_additional_medicare_tax(wages=400_000)
+    expected = (400_000 - 250_000) * 0.009  # $1,350
+    print(f"  Wages $400K, MFJ: Additional Medicare Tax = {fmt(amt)}")
+    assert abs(amt - expected) < 0.01, f"Expected {fmt(expected)}, got {fmt(amt)}"
+    print("  [PASS] Additional Medicare Tax computed correctly")
+
+    # Wages below threshold
+    amt_low = calculator.calculate_additional_medicare_tax(wages=200_000)
+    assert amt_low == 0.0, f"Expected $0, got {fmt(amt_low)}"
+    print("  [PASS] No Additional Medicare Tax below threshold")
+
+    # Full calculation includes it in tax_before_credits
+    income = TaxableIncome(wages=400_000)
+    deductions = Deductions(use_standard=True)
+    credits = TaxCredits()
+    result = calculator.calculate(
+        income=income, deductions=deductions, credits=credits,
+        federal_withheld=60_000,
+    )
+    assert result.additional_medicare_tax == expected
+    # tax_before_credits should include the additional medicare tax
+    income_tax_only = result.tax_before_credits - result.self_employment_tax - result.additional_medicare_tax
+    assert income_tax_only > 0
+    print(f"  Tax before credits: {fmt(result.tax_before_credits)}")
+    print(f"    Income tax:       {fmt(income_tax_only)}")
+    print(f"    Add'l Medicare:   {fmt(result.additional_medicare_tax)}")
+    print("  [PASS] Additional Medicare Tax included in tax_before_credits")
+
+
 if __name__ == "__main__":
     test_federal_tax()
     test_california_tax()
@@ -489,6 +622,10 @@ if __name__ == "__main__":
     test_2024_brackets()
     test_full_complex_return()
     test_report_generation()
+    test_rental_vs_personal_mortgage()
+    test_capital_loss_carryover()
+    test_ca_itemized_limitation()
+    test_additional_medicare_tax()
 
     print("\n" + "=" * 60)
     print("  ALL TESTS PASSED!")

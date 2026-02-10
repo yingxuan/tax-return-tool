@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .document_parser import ParsedDocument
 from .models import (
     W2Data, Form1099Int, Form1099Div, Form1099Misc, Form1099Nec,
-    Form1099R, Form1099B, Form1098
+    Form1099R, Form1099B, Form1099G, Form1098, Form1098T,
 )
 
 
@@ -128,43 +128,52 @@ class TaxDataExtractor:
     }
 
     # 1099-R patterns (retirement distributions)
+    # Real 1099-R PDFs put dollar values on a different line from the label,
+    # so patterns must allow matching across newlines.
     FORM_1099_R_PATTERNS = {
         'payer_name': [
+            r"PAYER.?S\s+name,\s*street[^\n]*\n([A-Z][A-Za-z\s&.,]+)",
             r"(?:payer'?s?\s+name)[:\s]*([A-Z][A-Za-z\s&.,]+)",
             r"PAYER.?S\s+NAME[^A-Z]*([A-Z][A-Za-z\s&.,]+)",
         ],
         'gross_distribution': [
-            r"1\s*Gross\s*distribution\s*([\d,]+\.?\d*)",
-            r"Gross\s*distribution\s*([\d,]+\.?\d*)",
+            r"\$\s*([\d,]+\.\d{2})\s*(?:Retirement|$)",
+            r"1\s*Gross\s*distribution[\s\S]{0,80}\$([\d,]+\.\d{2})",
+            r"Gross\s*distribution[\s\S]{0,80}\$([\d,]+\.\d{2})",
+            r"(?:box\s*1|gross\s+distribution)[:\s]*\$?([\d,]+\.?\d*)",
         ],
         'taxable_amount': [
-            r"2a\s*Taxable\s*amount\s*([\d,]+\.?\d*)",
-            r"Taxable\s*amount\s*([\d,]+\.?\d*)",
+            r"2a\s*Taxable\s*amount[\s\S]{0,80}\$([\d,]+\.\d{2})",
+            r"Taxable\s*amount[\s\S]{0,40}\$([\d,]+\.\d{2})",
+            r"(?:box\s*2a|taxable\s+amount)[:\s]*\$?([\d,]+\.?\d*)",
         ],
         'federal_withheld': [
-            r"4\s*Federal\s*income\s*tax\s*withheld\s*([\d,]+\.?\d*)",
-            r"Federal\s*income\s*tax\s*withheld\s*([\d,]+\.?\d*)",
+            r"4\s*Federal\s*income\s*tax\s*withheld[\s\S]{0,80}\$([\d,]+\.\d{2})",
+            r"Federal\s*income\s*tax\s*withheld[\s\S]{0,40}\$([\d,]+\.\d{2})",
+            r"(?:box\s*4|federal\s+income\s+tax\s+withheld)[:\s]*\$?([\d,]+\.?\d*)",
         ],
         'state_withheld': [
-            r"12\s*State\s*tax\s*withheld\s*([\d,]+\.?\d*)",
-            r"State\s*tax\s*withheld\s*([\d,]+\.?\d*)",
+            r"14\s*State\s*tax\s*withheld[\s\S]{0,40}\$([\d,]+\.\d{2})",
+            r"State\s*tax\s*withheld[\s\S]{0,40}\$([\d,]+\.\d{2})",
         ],
     }
 
     # 1098 patterns (mortgage interest)
     FORM_1098_PATTERNS = {
         'lender_name': [
+            r"RECIPIENT.?S/LENDER.?S\s+name[^A-Z]*\n([A-Z][A-Za-z\s&.,]+)",
             r"(?:recipient|lender).?s?\s*name[^A-Z]*([A-Z][A-Za-z\s&.,]+)",
             r"RECIPIENT.?S\s+NAME[^A-Z]*([A-Z][A-Za-z\s&.,]+)",
         ],
         'mortgage_interest': [
-            r"1\s*Mortgage\s*interest\s*(?:received)?\s*([\d,]+\.?\d*)",
-            r"Mortgage\s*interest\s*(?:received)?\s*([\d,]+\.?\d*)",
-            r"Box\s*1[^$]*([\d,]+\.?\d*)",
+            r"1\s*Mortgage\s*interest\s*(?:received)?[^$]*\$([\d,]+\.\d{2})",
+            r"Mortgage\s*interest\s*(?:received\s*from)?[^$]*\$([\d,]+\.\d{2})",
+            r"(?:box\s*1|mortgage\s+interest)[:\s]*\$?([\d,]+\.?\d+)",
         ],
         'property_taxes': [
-            r"10\s*(?:Real\s*estate|Property)\s*taxes?\s*([\d,]+\.?\d*)",
-            r"(?:Real\s*estate|Property)\s*taxes?\s*([\d,]+\.?\d*)",
+            r"Real\s*[Ee]state\s*[Tt]axes?\s*[Pp]aid\s*(?:in\s*\d{4})?\s*\$([\d,]+\.\d{2})",
+            r"10\s*(?:Real\s*estate|Property)\s*taxes?[^$]*\$([\d,]+\.\d{2})",
+            r"(?:box\s*10|property\s+taxes?)[:\s]*\$?([\d,]+\.?\d*)",
         ],
     }
 
@@ -350,6 +359,12 @@ class TaxDataExtractor:
         # 1099-R (retirement) patterns
         elif '1099-R' in text_upper or ('1099' in text_upper and 'DISTRIBUTIONS FROM PENSIONS' in text_upper):
             return '1099-R'
+        # 1099-G (government payments) patterns
+        elif '1099-G' in text_upper or ('1099' in text_upper and 'GOVERNMENT PAYMENTS' in text_upper):
+            return '1099-G'
+        # 1098-T (tuition) patterns - check before generic 1098
+        elif '1098-T' in text_upper or ('1098' in text_upper and 'TUITION' in text_upper):
+            return '1098-T'
         # 1098 (mortgage interest) patterns
         elif '1098' in text_upper and 'MORTGAGE' in text_upper:
             return '1098'
@@ -641,12 +656,15 @@ class TaxDataExtractor:
             warnings=warnings
         )
 
-    def extract(self, document: ParsedDocument) -> ExtractionResult:
+    def extract(self, document: ParsedDocument, category_hint: Optional[str] = None) -> ExtractionResult:
         """
         Auto-detect form type and extract data.
 
         Args:
             document: Parsed document content
+            category_hint: Optional category from folder-based classification
+                           (e.g. 'W-2', '1099-INT'). Used as fallback when
+                           text-based identification fails.
 
         Returns:
             ExtractionResult with appropriate form data
@@ -660,6 +678,10 @@ class TaxDataExtractor:
         # Fall back to regex-based extraction for PDF/images
         form_type = self.identify_form_type(document.text_content)
 
+        # Use category hint as fallback when text-based identification fails
+        if not form_type and category_hint:
+            form_type = category_hint
+
         if form_type == 'W-2':
             return self.extract_w2(document)
         elif form_type == '1099-INT':
@@ -672,6 +694,22 @@ class TaxDataExtractor:
             return self.extract_1099_r(document)
         elif form_type == '1098':
             return self.extract_1098(document)
+        elif form_type == '1099-G':
+            return ExtractionResult(
+                success=False,
+                form_type='1099-G',
+                data=None,
+                confidence=0.0,
+                warnings=[f"1099-G detected but extraction not yet implemented: {document.file_path}"]
+            )
+        elif form_type == '1098-T':
+            return ExtractionResult(
+                success=False,
+                form_type='1098-T',
+                data=None,
+                confidence=0.0,
+                warnings=[f"1098-T detected but extraction not yet implemented: {document.file_path}"]
+            )
         elif form_type == '1099-B':
             # 1099-B is complex, return basic info
             return ExtractionResult(
@@ -690,19 +728,26 @@ class TaxDataExtractor:
                 warnings=[f"Could not identify form type in {document.file_path}"]
             )
 
-    def extract_all(self, documents: List[ParsedDocument]) -> List[ExtractionResult]:
+    def extract_all(
+        self,
+        documents: List[ParsedDocument],
+        category_hints: Optional[dict] = None,
+    ) -> List[ExtractionResult]:
         """
         Extract tax data from multiple documents.
 
         Args:
             documents: List of parsed documents
+            category_hints: Optional dict mapping file paths to category strings
+                            from folder-based classification.
 
         Returns:
             List of extraction results
         """
         results = []
         for doc in documents:
-            result = self.extract(doc)
+            hint = (category_hints or {}).get(doc.file_path)
+            result = self.extract(doc, category_hint=hint)
             results.append(result)
             if result.success:
                 print(f"Extracted {result.form_type} from {doc.file_path}")

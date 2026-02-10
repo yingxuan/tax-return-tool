@@ -20,6 +20,32 @@ FEDERAL_SALT_CAP_MFS = 5_000  # Married Filing Separately
 # Medical expense AGI floor
 MEDICAL_AGI_FLOOR_RATE = 0.075  # 7.5% of AGI
 
+# Mortgage acquisition debt limits (TCJA: post-Dec 15, 2017 mortgages)
+FEDERAL_MORTGAGE_DEBT_LIMIT = 750_000
+FEDERAL_MORTGAGE_DEBT_LIMIT_MFS = 375_000
+CA_MORTGAGE_DEBT_LIMIT = 1_000_000  # CA did not conform to TCJA reduction
+CA_MORTGAGE_DEBT_LIMIT_MFS = 500_000
+
+# ---------------------------------------------------------------------------
+# CA Itemized Deduction Limitation (high-income phaseout)
+# ---------------------------------------------------------------------------
+CA_ITEMIZED_LIMITATION_THRESHOLD = {
+    2024: {
+        FilingStatus.SINGLE: 226_382,
+        FilingStatus.MARRIED_FILING_JOINTLY: 452_761,
+        FilingStatus.MARRIED_FILING_SEPARATELY: 226_382,
+        FilingStatus.HEAD_OF_HOUSEHOLD: 339_571,
+    },
+    2025: {
+        FilingStatus.SINGLE: 233_774,
+        FilingStatus.MARRIED_FILING_JOINTLY: 467_547,
+        FilingStatus.MARRIED_FILING_SEPARATELY: 233_774,
+        FilingStatus.HEAD_OF_HOUSEHOLD: 350_660,
+    },
+}
+CA_ITEMIZED_LIMITATION_RATE = 0.06
+CA_ITEMIZED_LIMITATION_MAX_RATE = 0.80
+
 
 class ScheduleACalculator:
     """Calculate Schedule A (Itemized Deductions)."""
@@ -70,11 +96,17 @@ class ScheduleACalculator:
         salt_deduction = min(salt_uncapped, salt_cap)
 
         # --- Interest (Line 8-10) ---
-        mortgage_interest_deduction = (
-            data.mortgage_interest +
-            data.mortgage_points +
-            data.investment_interest
-        )
+        home_mortgage = data.mortgage_interest + data.mortgage_points
+        # Apply federal mortgage debt limit proration
+        if data.mortgage_balance > 0:
+            limit = (
+                FEDERAL_MORTGAGE_DEBT_LIMIT_MFS
+                if self.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY
+                else FEDERAL_MORTGAGE_DEBT_LIMIT
+            )
+            if data.mortgage_balance > limit:
+                home_mortgage *= limit / data.mortgage_balance
+        mortgage_interest_deduction = home_mortgage + data.investment_interest
 
         # --- Charitable Contributions (Line 11-14) ---
         charitable_deduction = data.cash_contributions + data.noncash_contributions
@@ -113,6 +145,8 @@ class ScheduleACalculator:
         data: ScheduleAData,
         agi: float,
         ca_standard_deduction: float,
+        filing_status: FilingStatus = FilingStatus.SINGLE,
+        tax_year: int = 2025,
     ) -> ScheduleAResult:
         """
         Compute California-specific itemized deductions.
@@ -123,11 +157,14 @@ class ScheduleACalculator:
           (you can't deduct CA tax on your CA return)
         - VLF is deductible as personal property tax (no cap)
         - Medical expense threshold same as federal (7.5%)
+        - High-income limitation: reduce by min(6% * (AGI - threshold), 80% * itemized)
 
         Args:
             data: ScheduleAData with all inputs.
             agi: California AGI.
             ca_standard_deduction: CA standard deduction for comparison.
+            filing_status: Filing status for limitation threshold.
+            tax_year: Tax year for limitation threshold.
 
         Returns:
             ScheduleAResult for California.
@@ -148,12 +185,17 @@ class ScheduleACalculator:
         # CA has no SALT cap
         salt_deduction = salt_uncapped
 
-        # Interest - same as federal
-        mortgage_interest_deduction = (
-            data.mortgage_interest +
-            data.mortgage_points +
-            data.investment_interest
-        )
+        # Interest - CA uses $1M debt limit (did not conform to TCJA $750K)
+        home_mortgage = data.mortgage_interest + data.mortgage_points
+        if data.mortgage_balance > 0:
+            ca_limit = (
+                CA_MORTGAGE_DEBT_LIMIT_MFS
+                if filing_status == FilingStatus.MARRIED_FILING_SEPARATELY
+                else CA_MORTGAGE_DEBT_LIMIT
+            )
+            if data.mortgage_balance > ca_limit:
+                home_mortgage *= ca_limit / data.mortgage_balance
+        mortgage_interest_deduction = home_mortgage + data.investment_interest
 
         # Charitable - same as federal
         charitable_deduction = data.cash_contributions + data.noncash_contributions
@@ -169,6 +211,19 @@ class ScheduleACalculator:
             other_deductions
         )
 
+        # CA itemized deduction limitation for high-income taxpayers
+        ca_limitation = 0.0
+        thresholds = CA_ITEMIZED_LIMITATION_THRESHOLD.get(
+            tax_year, CA_ITEMIZED_LIMITATION_THRESHOLD[2025]
+        )
+        threshold = thresholds[filing_status]
+        if agi > threshold and total_itemized > 0:
+            ca_limitation = min(
+                CA_ITEMIZED_LIMITATION_RATE * (agi - threshold),
+                CA_ITEMIZED_LIMITATION_MAX_RATE * total_itemized,
+            )
+            total_itemized -= ca_limitation
+
         use_itemized = total_itemized > ca_standard_deduction
         deduction_amount = total_itemized if use_itemized else ca_standard_deduction
 
@@ -183,4 +238,5 @@ class ScheduleACalculator:
             standard_deduction=ca_standard_deduction,
             use_itemized=use_itemized,
             deduction_amount=round(deduction_amount, 2),
+            ca_itemized_limitation=round(ca_limitation, 2),
         )

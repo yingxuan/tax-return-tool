@@ -112,12 +112,30 @@ class Form1099B:
 
 
 @dataclass
+class Form1099G:
+    """1099-G form data for government payments."""
+    payer_name: str
+    state_tax_refund: float = 0.0  # Box 2
+    unemployment_compensation: float = 0.0  # Box 1
+    federal_withheld: float = 0.0  # Box 4
+
+
+@dataclass
 class Form1098:
     """1098 form data for mortgage interest."""
     lender_name: str
     mortgage_interest: float = 0.0  # Box 1
     points_paid: float = 0.0  # Box 6
     property_taxes: float = 0.0  # Box 10 (if reported)
+    is_rental: bool = False  # True if this mortgage is for a rental property
+
+
+@dataclass
+class Form1098T:
+    """1098-T form data for tuition payments."""
+    institution_name: str
+    amounts_billed: float = 0.0  # Box 1
+    scholarships_grants: float = 0.0  # Box 5
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +248,7 @@ class ScheduleAData:
     mortgage_interest: float = 0.0  # From Form 1098
     mortgage_points: float = 0.0
     investment_interest: float = 0.0
+    mortgage_balance: float = 0.0  # Outstanding principal for debt limit proration
 
     # Charitable contributions
     cash_contributions: float = 0.0
@@ -258,6 +277,7 @@ class ScheduleAResult:
     standard_deduction: float = 0.0
     use_itemized: bool = False  # True if itemized > standard
     deduction_amount: float = 0.0  # The higher of the two
+    ca_itemized_limitation: float = 0.0  # CA high-income itemized deduction reduction
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +434,7 @@ class TaxCalculation:
     tax_withheld: float = 0.0
     estimated_payments: float = 0.0
     self_employment_tax: float = 0.0
+    additional_medicare_tax: float = 0.0  # 0.9% on wages over threshold
 
     # Detailed breakdown for report
     deduction_method: str = "standard"  # "standard" or "itemized"
@@ -459,7 +480,9 @@ class TaxReturn:
     form_1099_nec: list = field(default_factory=list)
     form_1099_r: list = field(default_factory=list)
     form_1099_b: list = field(default_factory=list)
+    form_1099_g: list = field(default_factory=list)
     form_1098: list = field(default_factory=list)
+    form_1098_t: list = field(default_factory=list)
 
     # Enhanced data
     rental_properties: List[RentalProperty] = field(default_factory=list)
@@ -493,6 +516,16 @@ class TaxReturn:
     def total_mortgage_interest(self) -> float:
         """Calculate total mortgage interest from 1098 forms."""
         return sum(f.mortgage_interest for f in self.form_1098)
+
+    @property
+    def total_personal_mortgage_interest(self) -> float:
+        """Mortgage interest from personal (non-rental) 1098 forms."""
+        return sum(f.mortgage_interest for f in self.form_1098 if not f.is_rental)
+
+    @property
+    def total_rental_mortgage_interest(self) -> float:
+        """Mortgage interest from rental property 1098 forms."""
+        return sum(f.mortgage_interest for f in self.form_1098 if f.is_rental)
 
     @property
     def total_federal_estimated_payments(self) -> float:

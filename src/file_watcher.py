@@ -3,6 +3,10 @@
 Monitors a directory for new tax forms and receipts, automatically
 categorizing them by type. Supports both polling-based watching
 and one-shot scanning.
+
+Categorization priority:
+  1. Parent folder path segments (deepest match first)
+  2. Filename keyword matching (fallback)
 """
 
 import os
@@ -18,7 +22,24 @@ SUPPORTED_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp',
 }
 
-# Keywords used to auto-categorize files by name
+# Map folder names (lowered) to document categories.
+# Checked deepest-first against the relative path segments.
+FOLDER_CATEGORY_MAP: Dict[str, str] = {
+    'w2': 'W-2',
+    '1098': '1098',
+    'bank': '1099-INT',
+    'brokers': '1099-B',
+    'ira_retirement': '1099-R',
+    '529': '529 Plan',
+    'car_registration': 'Vehicle Registration',
+    'estimated tax receipts': 'Estimated Payment',
+    'fsa': 'FSA',
+    'home insurance': 'Home Insurance',
+    'property tax': 'Property Tax',
+    'rental': 'Schedule E',
+}
+
+# Keywords used to auto-categorize files by name (fallback)
 FORM_KEYWORDS: Dict[str, List[str]] = {
     'W-2': ['w2', 'w-2', 'wage'],
     '1099-INT': ['1099int', '1099-int', 'interest'],
@@ -27,12 +48,20 @@ FORM_KEYWORDS: Dict[str, List[str]] = {
     '1099-MISC': ['1099misc', '1099-misc', 'miscellaneous'],
     '1099-B': ['1099b', '1099-b', 'broker', 'brokerage'],
     '1099-R': ['1099r', '1099-r', 'retirement', 'distribution'],
+    '1099-G': ['1099g', '1099-g'],
     '1098': ['1098', 'mortgage'],
+    '1098-T': ['1098t', '1098-t'],
     'Schedule E': ['schedule-e', 'schedulee', 'rental'],
     'Receipt': ['receipt', 'expense'],
     'Vehicle Registration': ['vehicle', 'registration', 'dmv', 'vlf'],
     'Property Tax': ['property-tax', 'propertytax', 'real-estate-tax'],
     'Estimated Payment': ['estimated', 'voucher', '1040-es', '540-es'],
+}
+
+# Categories where we can auto-extract structured data
+EXTRACTABLE_CATEGORIES: Set[str] = {
+    'W-2', '1099-INT', '1099-DIV', '1099-NEC', '1099-MISC',
+    '1099-R', '1098',
 }
 
 
@@ -78,22 +107,92 @@ class TaxDocumentWatcher:
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
-    def _categorize_file(self, filename: str) -> Optional[str]:
+    # ------------------------------------------------------------------
+    # Categorization
+    # ------------------------------------------------------------------
+
+    def _categorize_file(self, file_path: Path) -> Optional[str]:
         """
-        Attempt to categorize a file based on its name.
+        Categorize a file using folder structure first, then filename.
+
+        Folder segments are checked deepest-first against
+        FOLDER_CATEGORY_MAP.  If a match is found, special refinement
+        is applied (e.g. 1098-T inside the 1098 folder, or 1099-G
+        inside the 1099 folder).  Falls back to filename keyword
+        matching.
 
         Args:
-            filename: The filename (without path).
+            file_path: Absolute path of the file.
 
         Returns:
             Category string or None if unrecognized.
         """
+        # Compute path segments relative to the watch directory
+        try:
+            rel = file_path.relative_to(self.watch_dir)
+        except ValueError:
+            rel = file_path
+
+        # Walk parent segments deepest-first (exclude the filename itself)
+        parts = [p.lower() for p in rel.parts[:-1]]
+        for segment in reversed(parts):
+            if segment in FOLDER_CATEGORY_MAP:
+                category = FOLDER_CATEGORY_MAP[segment]
+                # Refine within 1098 folder
+                if category == '1098':
+                    category = self._refine_1098_from_filename(file_path.name, category)
+                return category
+
+        # Check for 1099 parent folder with sub-type in filename
+        if '1099' in parts:
+            refined = self._refine_1099_from_filename(file_path.name)
+            if refined:
+                return refined
+
+        # Fallback: filename-based keyword matching
+        return self._categorize_by_filename(file_path.name)
+
+    @staticmethod
+    def _refine_1099_from_filename(filename: str) -> Optional[str]:
+        """Refine 1099 sub-type from the filename for files directly in a 1099/ folder."""
+        name_lower = filename.lower().replace(' ', '').replace('_', '')
+        if '1099-g' in name_lower or '1099g' in name_lower:
+            return '1099-G'
+        if '1099-int' in name_lower or '1099int' in name_lower:
+            return '1099-INT'
+        if '1099-div' in name_lower or '1099div' in name_lower:
+            return '1099-DIV'
+        if '1099-r' in name_lower or '1099r' in name_lower:
+            return '1099-R'
+        if '1099-b' in name_lower or '1099b' in name_lower:
+            return '1099-B'
+        if '1099-nec' in name_lower or '1099nec' in name_lower:
+            return '1099-NEC'
+        if '1099-misc' in name_lower or '1099misc' in name_lower:
+            return '1099-MISC'
+        return '1099'
+
+    @staticmethod
+    def _refine_1098_from_filename(filename: str, default: str) -> str:
+        """Detect 1098-T from filename within the 1098 folder."""
+        name_lower = filename.lower().replace(' ', '').replace('_', '')
+        if '1098-t' in name_lower or '1098t' in name_lower:
+            return '1098-T'
+        return default
+
+    @staticmethod
+    def _categorize_by_filename(filename: str) -> Optional[str]:
+        """Categorize a file based solely on filename keywords."""
         name_lower = filename.lower().replace(' ', '').replace('_', '')
         for category, keywords in FORM_KEYWORDS.items():
             for keyword in keywords:
                 if keyword.replace('-', '') in name_lower:
                     return category
         return None
+
+    # ------------------------------------------------------------------
+    # Scanning
+    # ------------------------------------------------------------------
 
     def scan_directory(self) -> List[DetectedFile]:
         """
@@ -117,7 +216,7 @@ class TaxDocumentWatcher:
                 path=str(file_path),
                 filename=file_path.name,
                 extension=file_path.suffix.lower(),
-                category=self._categorize_file(file_path.name),
+                category=self._categorize_file(file_path),
                 size_bytes=stat.st_size,
                 modified_time=stat.st_mtime,
             )
@@ -193,17 +292,27 @@ class TaxDocumentWatcher:
     @staticmethod
     def print_summary(categorized: Dict[str, List[DetectedFile]]):
         """Print a formatted summary of detected files."""
-        print("\n" + "=" * 50)
+        print("\n" + "=" * 60)
         print("  TAX DOCUMENT INVENTORY")
-        print("=" * 50)
+        print("=" * 60)
 
         total = 0
+        extractable_count = 0
+        manual_count = 0
         for category, files in sorted(categorized.items()):
-            print(f"\n  {category}:")
+            if category in EXTRACTABLE_CATEGORIES:
+                tag = "[auto-extract]"
+                extractable_count += len(files)
+            else:
+                tag = "[manual review]"
+                manual_count += len(files)
+            print(f"\n  {category} {tag}:")
             for f in files:
                 size_kb = f.size_bytes / 1024
                 print(f"    - {f.filename} ({size_kb:.1f} KB)")
                 total += 1
 
         print(f"\n  Total documents: {total}")
-        print("=" * 50)
+        print(f"    Auto-extractable: {extractable_count}")
+        print(f"    Manual review:    {manual_count}")
+        print("=" * 60)

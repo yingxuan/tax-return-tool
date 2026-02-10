@@ -240,6 +240,13 @@ class FederalTaxCalculator:
         total_se_tax = ss_tax + medicare_tax
         return total_se_tax, total_se_tax / 2
 
+    def calculate_additional_medicare_tax(self, wages: float) -> float:
+        """Calculate 0.9% Additional Medicare Tax on W-2 wages exceeding threshold."""
+        threshold = ADDITIONAL_MEDICARE_THRESHOLD[self.filing_status]
+        if wages > threshold:
+            return (wages - threshold) * ADDITIONAL_MEDICARE_RATE
+        return 0.0
+
     def calculate_child_tax_credit(
         self, num_qualifying_children: int, agi: float
     ) -> float:
@@ -336,8 +343,11 @@ class FederalTaxCalculator:
         # --- Tax (Line 16) ---
         income_tax, bracket_breakdown = self.calculate_progressive_tax(taxable_income)
 
+        # Additional Medicare Tax on W-2 wages (0.9% over threshold)
+        additional_medicare = self.calculate_additional_medicare_tax(income.wages)
+
         # Add SE tax (this goes on Schedule SE / Line 23)
-        tax_before_credits = income_tax + se_tax
+        tax_before_credits = income_tax + se_tax + additional_medicare
 
         # --- Credits (Lines 19-21) ---
         # Child Tax Credit
@@ -361,6 +371,7 @@ class FederalTaxCalculator:
             tax_withheld=round(federal_withheld, 2),
             estimated_payments=round(estimated_payments, 2),
             self_employment_tax=round(se_tax, 2),
+            additional_medicare_tax=round(additional_medicare, 2),
             deduction_method=deduction_method,
             bracket_breakdown=bracket_breakdown,
             schedule_e_summary=schedule_e_summary,

@@ -1,0 +1,21 @@
+tax_year: 2025
+
+taxpayer:
+  name: "Ying & Ting"
+  filing_status: married_jointly
+  age: 42
+  is_ca_resident: true
+  is_renter: false
+  dependents: [Angela, Eva]
+
+document_folder: "C:\\Users\\yxuan\\Documents\\tax2025\\2025"
+
+# 1098 forms with lender names matching these keywords are treated as rental mortgage
+rental_1098_keywords: ["hiawatha"]
+
+# Capital loss carryover from prior year (applied up to $3,000 per year)
+capital_loss_carryover: 238166.68
+
+# Outstanding mortgage principal on personal residence (for $750K/$1M debt limit)
+# Set to 0 to skip proration (e.g. if balance is under $750K)
+personal_mortgage_balance: 0

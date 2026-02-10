@@ -29,6 +29,12 @@ class DocumentParser:
     IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp'}
     SPREADSHEET_EXTENSIONS = {'.csv', '.xlsx', '.xls'}
 
+    # Common Tesseract install locations on Windows
+    _TESSERACT_PATHS = [
+        r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+        r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+    ]
+
     def __init__(self, tesseract_path: Optional[str] = None):
         """
         Initialize the document parser.
@@ -38,6 +44,12 @@ class DocumentParser:
         """
         if tesseract_path:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        else:
+            # Auto-detect Tesseract on Windows if not in PATH
+            for candidate in self._TESSERACT_PATHS:
+                if os.path.isfile(candidate):
+                    pytesseract.pytesseract.tesseract_cmd = candidate
+                    break
 
     def parse(self, file_path: str) -> ParsedDocument:
         """
@@ -89,10 +101,36 @@ class DocumentParser:
                         df = pd.DataFrame(table[1:], columns=table[0] if table else None)
                         tables.append(df)
 
+        combined_text = '\n\n'.join(text_content)
+
+        # If pdfplumber found no text, fall back to OCR (scanned PDF)
+        if not combined_text.strip():
+            try:
+                from pdf2image import convert_from_path
+                images = convert_from_path(file_path)
+                ocr_parts = []
+                for img in images:
+                    ocr_text = pytesseract.image_to_string(img)
+                    if ocr_text:
+                        ocr_parts.append(ocr_text)
+                combined_text = '\n\n'.join(ocr_parts)
+            except ImportError:
+                # pdf2image not installed; try rendering with pdfplumber
+                try:
+                    with pdfplumber.open(file_path) as pdf2:
+                        for page in pdf2.pages:
+                            img = page.to_image(resolution=300).original
+                            ocr_text = pytesseract.image_to_string(img)
+                            if ocr_text:
+                                text_content.append(ocr_text)
+                    combined_text = '\n\n'.join(text_content)
+                except Exception:
+                    pass  # No OCR available
+
         return ParsedDocument(
             file_path=file_path,
             file_type='pdf',
-            text_content='\n\n'.join(text_content),
+            text_content=combined_text,
             tables=tables
         )
 

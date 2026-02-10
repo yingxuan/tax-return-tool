@@ -19,7 +19,19 @@ from .california_tax import CaliforniaTaxCalculator
 from .schedule_e import ScheduleECalculator
 from .schedule_a import ScheduleACalculator
 from .report_generator import generate_full_report
-from .file_watcher import TaxDocumentWatcher
+from .file_watcher import TaxDocumentWatcher, EXTRACTABLE_CATEGORIES
+from .config_loader import load_config, TaxProfileConfig
+
+
+# Map config / CLI filing status strings to enum
+STATUS_MAP = {
+    "single": FilingStatus.SINGLE,
+    "married_jointly": FilingStatus.MARRIED_FILING_JOINTLY,
+    "married_filing_jointly": FilingStatus.MARRIED_FILING_JOINTLY,
+    "married_separately": FilingStatus.MARRIED_FILING_SEPARATELY,
+    "married_filing_separately": FilingStatus.MARRIED_FILING_SEPARATELY,
+    "head_of_household": FilingStatus.HEAD_OF_HOUSEHOLD,
+}
 
 
 def scan_local_folder(folder_path: str) -> List[str]:
@@ -44,6 +56,18 @@ def scan_local_folder(folder_path: str) -> List[str]:
 
     print(f"\nTotal files found: {len(files)}")
     return files
+
+
+def scan_and_categorize_folder(folder_path: str) -> dict:
+    """
+    Scan a folder using TaxDocumentWatcher for folder-aware categorization.
+
+    Prints a categorized inventory and returns the summary dict.
+    """
+    watcher = TaxDocumentWatcher(folder_path)
+    summary = watcher.get_summary()
+    TaxDocumentWatcher.print_summary(summary)
+    return summary
 
 
 def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
@@ -77,9 +101,11 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
     schedule_a_data = tax_return.schedule_a_data
 
     # If no explicit Schedule A data but we have 1098 forms, auto-populate
+    # Only use personal (non-rental) mortgage interest for Schedule A;
+    # rental mortgage interest flows through Schedule E instead.
     if not schedule_a_data and tax_return.form_1098:
         schedule_a_data = ScheduleAData(
-            mortgage_interest=tax_return.total_mortgage_interest,
+            mortgage_interest=tax_return.total_personal_mortgage_interest,
         )
 
     # ---------------------------------------------------------------
@@ -130,26 +156,71 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
     return tax_return
 
 
+def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
+    """Create a TaxpayerInfo from a config profile."""
+    filing_status = STATUS_MAP.get(
+        config.filing_status, FilingStatus.SINGLE
+    )
+    deps = [
+        Dependent(name=d.name, age=d.age, relationship=d.relationship)
+        for d in config.dependents
+    ]
+    return TaxpayerInfo(
+        name=config.taxpayer_name,
+        filing_status=filing_status,
+        age=config.age,
+        is_ca_resident=config.is_ca_resident,
+        is_renter=config.is_renter,
+        dependents=deps,
+    )
+
+
 def process_tax_documents(
     folder_id: Optional[str] = None,
     credentials_path: str = "config/credentials.json",
     local_files: Optional[list] = None,
     local_folder: Optional[str] = None,
+    config: Optional[TaxProfileConfig] = None,
 ) -> TaxReturn:
     """Process tax documents from files or Google Drive."""
     parser = DocumentParser()
     extractor = TaxDataExtractor()
 
-    taxpayer = TaxpayerInfo(name="Taxpayer", filing_status=FilingStatus.SINGLE)
+    # Build taxpayer from config or defaults
+    if config:
+        taxpayer = _build_taxpayer_from_config(config)
+        tax_year = config.tax_year
+    else:
+        taxpayer = TaxpayerInfo(name="Taxpayer", filing_status=FilingStatus.SINGLE)
+        tax_year = 2025
+
     income = TaxableIncome()
-    tax_return = TaxReturn(taxpayer=taxpayer, income=income)
+    tax_return = TaxReturn(taxpayer=taxpayer, income=income, tax_year=tax_year)
 
     parsed_docs = []
+    category_hints = {}  # file path -> category from folder scan
 
-    if local_folder:
-        local_files = scan_local_folder(local_folder)
+    # Determine the document folder
+    doc_folder = local_folder or (config.document_folder if config else None)
 
-    if local_files:
+    if doc_folder:
+        # Use folder-aware categorization to print inventory
+        summary = scan_and_categorize_folder(doc_folder)
+
+        # Collect only extractable files for parsing
+        extractable_files = []
+        for category, files in summary.items():
+            if category in EXTRACTABLE_CATEGORIES:
+                for f in files:
+                    extractable_files.append(f.path)
+                    category_hints[f.path] = category
+
+        if extractable_files:
+            print(f"\nProcessing {len(extractable_files)} auto-extractable document(s)...")
+            parsed_docs = parser.parse_multiple(extractable_files)
+        else:
+            print("\nNo auto-extractable documents found.")
+    elif local_files:
         print("\nProcessing local files...")
         parsed_docs = parser.parse_multiple(local_files)
     elif folder_id or credentials_path:
@@ -165,38 +236,55 @@ def process_tax_documents(
             return tax_return
 
     # Extract tax data
-    print("\nExtracting tax data...")
-    extraction_results = extractor.extract_all(parsed_docs)
+    if parsed_docs:
+        print("\nExtracting tax data...")
+        extraction_results = extractor.extract_all(parsed_docs, category_hints=category_hints)
 
-    for result in extraction_results:
-        if not result.success:
-            continue
+        for result in extraction_results:
+            if not result.success:
+                continue
 
-        if result.form_type == 'W-2':
-            w2 = result.data
-            tax_return.w2_forms.append(w2)
-            income.wages += w2.wages
-        elif result.form_type == '1099-INT':
-            form = result.data
-            tax_return.form_1099_int.append(form)
-            income.interest_income += form.interest_income
-        elif result.form_type == '1099-DIV':
-            form = result.data
-            tax_return.form_1099_div.append(form)
-            income.dividend_income += form.ordinary_dividends
-            income.qualified_dividends += form.qualified_dividends
-            income.capital_gains += form.capital_gain_distributions
-        elif result.form_type == '1099-NEC':
-            form = result.data
-            tax_return.form_1099_nec.append(form)
-            income.self_employment_income += form.nonemployee_compensation
-        elif result.form_type == '1099-R':
-            form = result.data
-            tax_return.form_1099_r.append(form)
-            income.retirement_income += form.taxable_amount
-        elif result.form_type == '1098':
-            form = result.data
-            tax_return.form_1098.append(form)
+            if result.form_type == 'W-2':
+                w2 = result.data
+                tax_return.w2_forms.append(w2)
+                income.wages += w2.wages
+            elif result.form_type == '1099-INT':
+                form = result.data
+                tax_return.form_1099_int.append(form)
+                income.interest_income += form.interest_income
+            elif result.form_type == '1099-DIV':
+                form = result.data
+                tax_return.form_1099_div.append(form)
+                income.dividend_income += form.ordinary_dividends
+                income.qualified_dividends += form.qualified_dividends
+                income.capital_gains += form.capital_gain_distributions
+            elif result.form_type == '1099-NEC':
+                form = result.data
+                tax_return.form_1099_nec.append(form)
+                income.self_employment_income += form.nonemployee_compensation
+            elif result.form_type == '1099-R':
+                form = result.data
+                tax_return.form_1099_r.append(form)
+                income.retirement_income += form.taxable_amount
+            elif result.form_type == '1098':
+                form = result.data
+                # Tag rental 1098s based on config keywords
+                if config and config.rental_1098_keywords:
+                    lender_lower = form.lender_name.lower()
+                    for kw in config.rental_1098_keywords:
+                        if kw in lender_lower:
+                            form.is_rental = True
+                            break
+                tax_return.form_1098.append(form)
+
+    # Apply capital loss carryover from prior year (capped at $3K for MFJ/Single, $1.5K for MFS)
+    if config and config.capital_loss_carryover > 0:
+        if taxpayer.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY:
+            cap = 1_500
+        else:
+            cap = 3_000
+        loss = min(config.capital_loss_carryover, cap)
+        income.capital_gains -= loss
 
     # Calculate
     print("\nCalculating taxes...")
@@ -413,6 +501,11 @@ def main():
         description="Tax Return Tool - Calculate Federal and California taxes"
     )
     parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to YAML config file (default: config/tax_profile.yaml)"
+    )
+    parser.add_argument(
         "--folder-id",
         help="Google Drive folder ID containing tax documents"
     )
@@ -440,12 +533,12 @@ def main():
     parser.add_argument(
         "--filing-status",
         choices=["single", "married_jointly", "married_separately", "head_of_household"],
-        default="single",
+        default=None,
         help="Tax filing status"
     )
     parser.add_argument(
         "--tax-year",
-        type=int, choices=[2024, 2025], default=2025,
+        type=int, choices=[2024, 2025], default=None,
         help="Target tax year (2024 or 2025)"
     )
 
@@ -463,28 +556,39 @@ def main():
         run_demo()
         return
 
-    # Map filing status
-    status_map = {
-        "single": FilingStatus.SINGLE,
-        "married_jointly": FilingStatus.MARRIED_FILING_JOINTLY,
-        "married_separately": FilingStatus.MARRIED_FILING_SEPARATELY,
-        "head_of_household": FilingStatus.HEAD_OF_HOUSEHOLD,
-    }
+    # Load config if specified
+    config = None
+    if args.config:
+        config = load_config(args.config)
+        if config:
+            print(f"\nLoaded config: {args.config}")
+            print(f"  Taxpayer: {config.taxpayer_name}")
+            print(f"  Filing status: {config.filing_status}")
+            print(f"  Tax year: {config.tax_year}")
+            if config.document_folder:
+                print(f"  Document folder: {config.document_folder}")
 
+    # Process documents
     tax_return = process_tax_documents(
         folder_id=args.folder_id,
         credentials_path=args.credentials,
         local_files=args.files,
         local_folder=args.local_folder,
+        config=config,
     )
 
-    tax_return.taxpayer.filing_status = status_map.get(
-        args.filing_status, FilingStatus.SINGLE
-    )
-    tax_return.tax_year = args.tax_year
+    # CLI overrides take precedence over config
+    if args.filing_status:
+        tax_return.taxpayer.filing_status = STATUS_MAP.get(
+            args.filing_status, FilingStatus.SINGLE
+        )
+    if args.tax_year:
+        tax_return.tax_year = args.tax_year
 
-    # Re-process with correct settings
-    tax_return = process_tax_return(tax_return)
+    # Re-process if CLI overrides were applied
+    if args.filing_status or args.tax_year:
+        tax_return = process_tax_return(tax_return)
+
     report = generate_full_report(tax_return)
     print(report)
 

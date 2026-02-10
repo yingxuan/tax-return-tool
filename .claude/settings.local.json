@@ -3,7 +3,10 @@
     "allow": [
       "Bash(python:*)",
       "Bash(dir:*)",
-      "Bash(pdftotext:*)"
+      "Bash(pdftotext:*)",
+      "Bash(cmd /c \"dir /b /s C:\\\\Users\\\\yxuan\\\\Documents\\\\tax2025\\\\2025\")",
+      "Bash(cmd /c \"dir /b C:\\\\Users\\\\yxuan\\\\Projects\\\\tax-return-tool\\\\config\")",
+      "Bash(del \"C:\\\\Users\\\\yxuan\\\\Projects\\\\tax-return-tool\\\\debug_extract.py\")"
     ]
   }
 }

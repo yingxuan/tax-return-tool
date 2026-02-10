@@ -72,6 +72,8 @@ def generate_schedule_a_report(result: ScheduleAResult, jurisdiction: str = "Fed
     lines.append(_line("Charitable Contributions", result.charitable_deduction))
     if result.other_deductions > 0:
         lines.append(_line("Other Deductions", result.other_deductions))
+    if result.ca_itemized_limitation > 0:
+        lines.append(_line("CA Itemized Deduction Limitation", -result.ca_itemized_limitation))
     lines.append("  " + "-" * 68)
     lines.append(_line("Total Itemized Deductions", result.total_itemized))
     lines.append(_line("Standard Deduction", result.standard_deduction))
@@ -126,12 +128,15 @@ def generate_federal_report(calc: TaxCalculation) -> str:
             rate_pct = f"{b['rate']*100:.1f}%"
             lines.append(f"    {b['bracket']:>30}  @{rate_pct:>6}  = {fmt(b['tax']):>12}")
 
-    income_tax = calc.tax_before_credits - calc.self_employment_tax
+    income_tax = calc.tax_before_credits - calc.self_employment_tax - calc.additional_medicare_tax
     lines.append("\n  " + "-" * 68)
     lines.append(_line("16.  Income Tax", income_tax))
 
     if calc.self_employment_tax > 0:
         lines.append(_line("23.  Self-Employment Tax", calc.self_employment_tax))
+
+    if calc.additional_medicare_tax > 0:
+        lines.append(_line("      Additional Medicare Tax (0.9%)", calc.additional_medicare_tax))
 
     lines.append(_line("24.  Tax Before Credits", calc.tax_before_credits))
 
