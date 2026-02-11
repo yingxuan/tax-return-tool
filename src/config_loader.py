@@ -61,11 +61,14 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
     deps_raw = taxpayer.get("dependents", []) or []
     deps = []
     for d in deps_raw:
-        deps.append(DependentConfig(
-            name=d.get("name", ""),
-            age=d.get("age", 0),
-            relationship=d.get("relationship", ""),
-        ))
+        if isinstance(d, str):
+            deps.append(DependentConfig(name=d))
+        elif isinstance(d, dict):
+            deps.append(DependentConfig(
+                name=d.get("name", ""),
+                age=d.get("age", 0),
+                relationship=d.get("relationship", ""),
+            ))
 
     return TaxProfileConfig(
         tax_year=raw.get("tax_year", 2025),

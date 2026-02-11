@@ -18,4 +18,4 @@ capital_loss_carryover: 238166.68
 
 # Outstanding mortgage principal on personal residence (for $750K/$1M debt limit)
 # Set to 0 to skip proration (e.g. if balance is under $750K)
-personal_mortgage_balance: 0
+personal_mortgage_balance: 270000000
