@@ -27,16 +27,21 @@ SUPPORTED_EXTENSIONS = {
 FOLDER_CATEGORY_MAP: Dict[str, str] = {
     'w2': 'W-2',
     '1098': '1098',
+    '1099': '1099',
     'bank': '1099-INT',
     'brokers': '1099-B',
     'ira_retirement': '1099-R',
     '529': '529 Plan',
     'car_registration': 'Vehicle Registration',
+    'car registration': 'Vehicle Registration',
     'estimated tax receipts': 'Estimated Payment',
+    'estimated tax paid': 'Estimated Payment',
     'fsa': 'FSA',
     'home insurance': 'Home Insurance',
     'property tax': 'Property Tax',
     'rental': 'Schedule E',
+    'donation': 'Charitable Contribution',
+    'donations': 'Charitable Contribution',
 }
 
 # Keywords used to auto-categorize files by name (fallback)
@@ -56,6 +61,7 @@ FORM_KEYWORDS: Dict[str, List[str]] = {
     'Vehicle Registration': ['vehicle', 'registration', 'dmv', 'vlf'],
     'Property Tax': ['property-tax', 'propertytax', 'real-estate-tax'],
     'Estimated Payment': ['estimated', 'voucher', '1040-es', '540-es'],
+    'Charitable Contribution': ['donation', 'charitable'],
 }
 
 # Categories where we can auto-extract structured data
@@ -141,13 +147,10 @@ class TaxDocumentWatcher:
                 # Refine within 1098 folder
                 if category == '1098':
                     category = self._refine_1098_from_filename(file_path.name, category)
+                # Refine within 1099 folder
+                if category == '1099':
+                    category = self._refine_1099_from_filename(file_path.name) or '1099'
                 return category
-
-        # Check for 1099 parent folder with sub-type in filename
-        if '1099' in parts:
-            refined = self._refine_1099_from_filename(file_path.name)
-            if refined:
-                return refined
 
         # Fallback: filename-based keyword matching
         return self._categorize_by_filename(file_path.name)
@@ -297,22 +300,15 @@ class TaxDocumentWatcher:
         print("=" * 60)
 
         total = 0
-        extractable_count = 0
-        manual_count = 0
         for category, files in sorted(categorized.items()):
-            if category in EXTRACTABLE_CATEGORIES:
-                tag = "[auto-extract]"
-                extractable_count += len(files)
-            else:
-                tag = "[manual review]"
-                manual_count += len(files)
+            tag = "[structured]" if category in EXTRACTABLE_CATEGORIES else "[OCR]"
             print(f"\n  {category} {tag}:")
             for f in files:
                 size_kb = f.size_bytes / 1024
-                print(f"    - {f.filename} ({size_kb:.1f} KB)")
+                # Use ASCII-safe filename for print (Windows cp1252 can't handle some Unicode)
+                safe_name = f.filename.encode('ascii', errors='replace').decode('ascii')
+                print(f"    - {safe_name} ({size_kb:.1f} KB)")
                 total += 1
 
         print(f"\n  Total documents: {total}")
-        print(f"    Auto-extractable: {extractable_count}")
-        print(f"    Manual review:    {manual_count}")
         print("=" * 60)

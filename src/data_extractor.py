@@ -24,6 +24,15 @@ class ExtractionResult:
 class TaxDataExtractor:
     """Extract tax form data from parsed documents."""
 
+    # Keywords that indicate a composite/consolidated 1099 statement
+    COMPOSITE_INDICATORS = [
+        'TAX REPORTING STATEMENT',
+        '1099 COMPOSITE',
+        'FORM 1099 COMPOSITE',
+        'CONSOLIDATED TAX',
+        'CONSOLIDATED 1099',
+    ]
+
     # W-2 box labels and their patterns
     W2_PATTERNS = {
         'employer_name': [
@@ -81,8 +90,10 @@ class TaxDataExtractor:
     FORM_1099_INT_PATTERNS = {
         'payer_name': [
             r"(?:payer'?s?\s+name)[:\s]*([A-Z][A-Za-z\s&.,]+)",
+            r"[Pp]ayer.?s\s+name:\s*([A-Z][A-Za-z\s&.,]+)",
         ],
         'interest_income': [
+            r"([\d,]+\.\d{2})\s*\n\s*1\.\s*INTEREST\s+INCOME",
             r"(?:box\s*1|interest\s+income)[:\s]*\$?([\d,]+\.?\d*)",
             r"1\s+Interest\s+income[^$]*\$?([\d,]+\.?\d*)",
         ],
@@ -155,6 +166,10 @@ class TaxDataExtractor:
         'state_withheld': [
             r"14\s*State\s*tax\s*withheld[\s\S]{0,40}\$([\d,]+\.\d{2})",
             r"State\s*tax\s*withheld[\s\S]{0,40}\$([\d,]+\.\d{2})",
+        ],
+        'distribution_code': [
+            r"7\s*Distribution\s*code\(?s?\)?[\s\S]{0,30}?([1-9A-Z]{1,2})\b",
+            r"(?:box\s*7|distribution\s+code)[:\s]*([1-9A-Z]{1,2})\b",
         ],
     }
 
@@ -610,12 +625,19 @@ class TaxDataExtractor:
         state_withheld_str, _ = self._extract_value(text, self.FORM_1099_R_PATTERNS['state_withheld'])
         state_withheld = self._parse_amount(state_withheld_str)
 
+        dist_code, _ = self._extract_value(text, self.FORM_1099_R_PATTERNS['distribution_code'])
+
+        # If taxable amount couldn't be parsed, flag it as not determined
+        taxable_not_determined = (taxable <= 0 and gross > 0)
+
         data = Form1099R(
             payer_name=payer_name.strip() if payer_name else "Unknown",
             gross_distribution=gross,
             taxable_amount=taxable if taxable > 0 else gross,
+            taxable_amount_not_determined=taxable_not_determined,
             federal_withheld=fed_withheld,
-            state_withheld=state_withheld
+            distribution_code=dist_code if dist_code else "",
+            state_withheld=state_withheld,
         )
 
         return ExtractionResult(
@@ -656,6 +678,211 @@ class TaxDataExtractor:
             warnings=warnings
         )
 
+    # ------------------------------------------------------------------
+    # Composite 1099 (consolidated brokerage statements)
+    # ------------------------------------------------------------------
+
+    def is_composite_1099(self, text: str) -> bool:
+        """Check if document is a composite/consolidated 1099 statement."""
+        text_upper = text.upper()
+        for indicator in self.COMPOSITE_INDICATORS:
+            if indicator in text_upper:
+                return True
+        # Also detect by presence of multiple 1099 form types
+        form_count = sum(
+            1 for ft in ['1099-DIV', '1099-INT', '1099-B']
+            if ft in text_upper
+        )
+        return form_count >= 2
+
+    def extract_composite_1099(self, document: ParsedDocument) -> List[ExtractionResult]:
+        """
+        Extract multiple 1099 forms from a composite/consolidated statement.
+
+        Composite brokerage statements (Fidelity, Schwab, Robinhood, Merrill)
+        contain 1099-DIV, 1099-INT, and 1099-B sections in a single PDF.
+
+        Returns:
+            List of ExtractionResult, one per detected sub-form.
+        """
+        text = document.text_content
+        text_upper = text.upper()
+        results = []
+
+        # Try to extract payer/broker name
+        payer_name = self._extract_composite_payer(text)
+
+        # --- 1099-DIV ---
+        if '1099-DIV' in text_upper or 'DIVIDENDS AND DISTRIBUTIONS' in text_upper:
+            div_result = self._extract_composite_div(text, payer_name)
+            if div_result:
+                results.append(div_result)
+
+        # --- 1099-INT ---
+        if '1099-INT' in text_upper or 'INTEREST INCOME' in text_upper:
+            int_result = self._extract_composite_int(text, payer_name)
+            if int_result:
+                results.append(int_result)
+
+        # --- 1099-B (informational only — not yet used by main.py) ---
+        if '1099-B' in text_upper:
+            b_result = self._extract_composite_b(text, payer_name, document.file_path)
+            if b_result:
+                results.append(b_result)
+
+        return results
+
+    @staticmethod
+    def _extract_composite_payer(text: str) -> str:
+        """Extract broker/payer name from a composite 1099 statement."""
+        patterns = [
+            r"PAYER.?S\s+(?:Name\s+and\s+)?Address[:\s]*\n([A-Z][A-Za-z\s&.,]+?)(?:\n|$)",
+            r"\n(NATIONAL FINANCIAL SERVICES[A-Za-z\s,.]*)",
+            r"\n(CHARLES SCHWAB[A-Za-z\s&,.]*)",
+            r"(Merrill[\s\w]+(?:LLC|Inc\.?))",
+            r"(Robinhood\s*(?:Securities|Markets)\s*(?:LLC|Inc\.?))",
+            r"(JPMORGAN\s*(?:SECURITIES|BROKER)[A-Za-z\s,.]*(?:LLC|INC\.?))",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+        return "Composite 1099"
+
+    def _extract_composite_div(self, text: str, payer_name: str) -> Optional[ExtractionResult]:
+        """Extract 1099-DIV data from composite statement text."""
+        # Patterns match across Fidelity (dotted), Robinhood (dash), ML/Schwab,
+        # and Chase (no-space labels like "Totalordinarydividends").
+        # Use finditer + sum to handle multi-account composites.
+        ordinary = 0.0
+        qualified = 0.0
+        cap_gain = 0.0
+
+        for m in re.finditer(
+            r'1a[\s.,-]*Total\s*[Oo]rdinary\s*[Dd]ividends.*?([\d,]+\.\d{2})', text
+        ):
+            ordinary += self._parse_amount(m.group(1))
+
+        for m in re.finditer(
+            r'1b[\s.,-]*[Qq]ualified\s*[Dd]ividends.*?([\d,]+\.\d{2})', text
+        ):
+            qualified += self._parse_amount(m.group(1))
+
+        for m in re.finditer(
+            r'2a[\s.,-]*Total\s*[Cc]apital\s*[Gg]ain.*?([\d,]+\.\d{2})', text
+        ):
+            cap_gain += self._parse_amount(m.group(1))
+
+        if ordinary <= 0:
+            return None
+
+        data = Form1099Div(
+            payer_name=payer_name,
+            ordinary_dividends=ordinary,
+            qualified_dividends=qualified,
+            capital_gain_distributions=cap_gain,
+            federal_withheld=0.0,
+        )
+        return ExtractionResult(
+            success=True,
+            form_type='1099-DIV',
+            data=data,
+            confidence=0.8,
+            warnings=[],
+        )
+
+    def _extract_composite_int(self, text: str, payer_name: str) -> Optional[ExtractionResult]:
+        """Extract 1099-INT data from composite statement text."""
+        interest_box1 = 0.0
+        interest_box3 = 0.0  # U.S. Treasury interest
+
+        # Box 1: Interest Income
+        # Pattern avoids matching "1099-INT" header (requires space/dot/dash after "1")
+        for m in re.finditer(
+            r'(?:^|\s)1[\s.,-]+Interest\s*[Ii]ncome.*?([\d,]+\.\d{2})', text, re.MULTILINE
+        ):
+            interest_box1 += self._parse_amount(m.group(1))
+
+        # Box 3: Interest on U.S. Savings Bonds and Treasury Obligations
+        for m in re.finditer(
+            r'3[\s.,-]+Interest\s*on\s*U\.?S\.?.*?(?:Treas|Treasury).*?([\d,]+\.\d{2})',
+            text, re.IGNORECASE,
+        ):
+            interest_box3 += self._parse_amount(m.group(1))
+
+        total_interest = interest_box1 + interest_box3
+        if total_interest <= 0:
+            return None
+
+        warnings = []
+        if interest_box3 > 0:
+            warnings.append(
+                f"Includes ${interest_box3:,.2f} in U.S. Treasury interest (state-exempt)"
+            )
+
+        data = Form1099Int(
+            payer_name=payer_name,
+            interest_income=total_interest,
+            federal_withheld=0.0,
+        )
+        return ExtractionResult(
+            success=True,
+            form_type='1099-INT',
+            data=data,
+            confidence=0.8,
+            warnings=warnings,
+        )
+
+    def _extract_composite_b(
+        self, text: str, payer_name: str, file_path: str
+    ) -> Optional[ExtractionResult]:
+        """Extract 1099-B summary from composite statement (informational)."""
+        # Look for the summary table with short-term/long-term totals
+        short_gain = 0.0
+        long_gain = 0.0
+
+        # Fidelity format: "Short-termtransactions...reported...IRS proceeds cost ... gain 0.00"
+        for m in re.finditer(
+            r'Short-term.*?reported\s+to\s+the\s+IRS\s+'
+            r'([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+[\d,]+\.\d{2}\s+(-?[\d,]+\.\d{2})',
+            text,
+        ):
+            short_gain += self._parse_amount(m.group(3))
+
+        for m in re.finditer(
+            r'Long-term.*?reported\s+to\s+the\s+IRS\s+'
+            r'([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+[\d,]+\.\d{2}\s+(-?[\d,]+\.\d{2})',
+            text,
+        ):
+            long_gain += self._parse_amount(m.group(3))
+
+        # Robinhood format: "Box AShort-Term Realized Gain/Loss"
+        for m in re.finditer(
+            r'Box\s*[AD].*?(?:Short|Long)-Term\s+Realized\s+(?:Gain|Loss)\s+(-?[\d,]+\.\d{2})',
+            text,
+        ):
+            val = self._parse_amount(m.group(1))
+            if 'Short' in m.group(0):
+                short_gain += val
+            else:
+                long_gain += val
+
+        total = short_gain + long_gain
+        if short_gain == 0 and long_gain == 0:
+            return None
+
+        return ExtractionResult(
+            success=False,  # Informational — needs manual review for Form 8949
+            form_type='1099-B',
+            data=None,
+            confidence=0.5,
+            warnings=[
+                f"1099-B summary from {file_path}: "
+                f"short-term={short_gain:+,.2f}, long-term={long_gain:+,.2f}, "
+                f"total={total:+,.2f} (requires Form 8949 for full reporting)"
+            ],
+        )
+
     def extract(self, document: ParsedDocument, category_hint: Optional[str] = None) -> ExtractionResult:
         """
         Auto-detect form type and extract data.
@@ -675,12 +902,14 @@ class TaxDataExtractor:
             if csv_result and csv_result.success:
                 return csv_result
 
-        # Fall back to regex-based extraction for PDF/images
-        form_type = self.identify_form_type(document.text_content)
-
-        # Use category hint as fallback when text-based identification fails
-        if not form_type and category_hint:
+        # Category hint from folder structure takes precedence over text-based
+        # detection, since folder placement is an explicit user signal and
+        # text-based matching can misidentify (e.g. a 1099-B containing "W-2"
+        # keywords in its boilerplate).
+        if category_hint:
             form_type = category_hint
+        else:
+            form_type = self.identify_form_type(document.text_content)
 
         if form_type == 'W-2':
             return self.extract_w2(document)
@@ -719,6 +948,36 @@ class TaxDataExtractor:
                 confidence=0.0,
                 warnings=[f"1099-B detected but requires manual review: {document.file_path}"]
             )
+        elif form_type == '1099':
+            # Generic 1099 folder — try text-based detection for sub-type
+            detected = self.identify_form_type(document.text_content)
+            if detected and detected.startswith('1099'):
+                return self.extract(document, category_hint=detected)
+            return ExtractionResult(
+                success=False,
+                form_type='1099',
+                data=None,
+                confidence=0.0,
+                warnings=[f"1099 form in {document.file_path} — could not determine sub-type from content; requires manual review"]
+            )
+        elif form_type == '1099-MISC':
+            return ExtractionResult(
+                success=False,
+                form_type='1099-MISC',
+                data=None,
+                confidence=0.0,
+                warnings=[f"1099-MISC detected but extraction not yet implemented: {document.file_path}"]
+            )
+        elif form_type in ('Property Tax', 'Vehicle Registration', 'Schedule E',
+                           'FSA', 'Estimated Payment', 'Charitable Contribution',
+                           'Home Insurance', '529 Plan'):
+            return ExtractionResult(
+                success=False,
+                form_type=form_type,
+                data=None,
+                confidence=0.0,
+                warnings=[f"Recognized as {form_type} -- requires manual entry in config: {document.file_path}"]
+            )
         else:
             return ExtractionResult(
                 success=False,
@@ -747,10 +1006,28 @@ class TaxDataExtractor:
         results = []
         for doc in documents:
             hint = (category_hints or {}).get(doc.file_path)
+
+            # Composite 1099: extract multiple form types from one document
+            if hint == '1099' and self.is_composite_1099(doc.text_content):
+                composite_results = self.extract_composite_1099(doc)
+                if composite_results:
+                    for r in composite_results:
+                        results.append(r)
+                        safe_path = doc.file_path.encode('ascii', errors='replace').decode('ascii')
+                        if r.success:
+                            print(f"Extracted {r.form_type} from {safe_path} (composite)")
+                        else:
+                            print(f"  {r.form_type} in {safe_path}: {r.warnings}")
+                    continue
+                # Composite detected but nothing extracted — fall back to
+                # single-form extraction (e.g. Chase 1099-INT with
+                # boilerplate mentioning other form types)
+
             result = self.extract(doc, category_hint=hint)
             results.append(result)
+            safe_path = doc.file_path.encode('ascii', errors='replace').decode('ascii')
             if result.success:
-                print(f"Extracted {result.form_type} from {doc.file_path}")
+                print(f"Extracted {result.form_type} from {safe_path}")
             else:
-                print(f"Could not extract data from {doc.file_path}: {result.warnings}")
+                print(f"Could not extract data from {safe_path}: {result.warnings}")
         return results

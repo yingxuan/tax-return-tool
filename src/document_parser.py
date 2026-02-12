@@ -210,9 +210,12 @@ class DocumentParser:
             try:
                 parsed = self.parse(file_path)
                 results.append(parsed)
-                print(f"Successfully parsed: {file_path}")
+                # Use ASCII-safe path for print (Windows cp1252 can't handle some Unicode)
+                safe_path = file_path.encode('ascii', errors='replace').decode('ascii')
+                print(f"Successfully parsed: {safe_path}")
             except Exception as e:
-                print(f"Error parsing {file_path}: {e}")
+                safe_path = file_path.encode('ascii', errors='replace').decode('ascii')
+                print(f"Error parsing {safe_path}: {e}")
         return results
 
 

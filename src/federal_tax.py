@@ -153,11 +153,78 @@ ADDITIONAL_MEDICARE_THRESHOLD = {
 }
 SELF_EMPLOYMENT_TAX_RATE = 0.153
 
+# ---------------------------------------------------------------------------
+# Net Investment Income Tax (NIIT) - 3.8%
+# ---------------------------------------------------------------------------
+NIIT_RATE = 0.038
+NIIT_THRESHOLD = {
+    FilingStatus.SINGLE: 200_000,
+    FilingStatus.MARRIED_FILING_JOINTLY: 250_000,
+    FilingStatus.MARRIED_FILING_SEPARATELY: 125_000,
+    FilingStatus.HEAD_OF_HOUSEHOLD: 200_000,
+}
+
+# ---------------------------------------------------------------------------
+# Qualified Dividends / Long-Term Capital Gains Rate Brackets
+# ---------------------------------------------------------------------------
+# 0% / 15% / 20% thresholds (taxable income breakpoints)
+LTCG_BRACKETS_2024 = {
+    FilingStatus.SINGLE: [
+        (47_025, 0.00),
+        (518_900, 0.15),
+        (float('inf'), 0.20),
+    ],
+    FilingStatus.MARRIED_FILING_JOINTLY: [
+        (94_050, 0.00),
+        (583_750, 0.15),
+        (float('inf'), 0.20),
+    ],
+    FilingStatus.MARRIED_FILING_SEPARATELY: [
+        (47_025, 0.00),
+        (291_850, 0.15),
+        (float('inf'), 0.20),
+    ],
+    FilingStatus.HEAD_OF_HOUSEHOLD: [
+        (63_000, 0.00),
+        (551_350, 0.15),
+        (float('inf'), 0.20),
+    ],
+}
+
+LTCG_BRACKETS_2025 = {
+    FilingStatus.SINGLE: [
+        (48_350, 0.00),
+        (533_400, 0.15),
+        (float('inf'), 0.20),
+    ],
+    FilingStatus.MARRIED_FILING_JOINTLY: [
+        (96_700, 0.00),
+        (600_050, 0.15),
+        (float('inf'), 0.20),
+    ],
+    FilingStatus.MARRIED_FILING_SEPARATELY: [
+        (48_350, 0.00),
+        (300_000, 0.15),
+        (float('inf'), 0.20),
+    ],
+    FilingStatus.HEAD_OF_HOUSEHOLD: [
+        (64_750, 0.00),
+        (566_700, 0.15),
+        (float('inf'), 0.20),
+    ],
+}
+
 
 def _get_brackets(tax_year: int, filing_status: FilingStatus):
     if tax_year == 2024:
         return FEDERAL_TAX_BRACKETS_2024[filing_status]
     return FEDERAL_TAX_BRACKETS_2025[filing_status]
+
+
+def _get_ltcg_brackets(tax_year: int, filing_status: FilingStatus):
+    if tax_year == 2024:
+        return LTCG_BRACKETS_2024[filing_status]
+    return LTCG_BRACKETS_2025[filing_status]
 
 
 class FederalTaxCalculator:
@@ -240,6 +307,72 @@ class FederalTaxCalculator:
         total_se_tax = ss_tax + medicare_tax
         return total_se_tax, total_se_tax / 2
 
+    def calculate_niit(self, income: TaxableIncome, magi: float) -> float:
+        """Calculate Net Investment Income Tax (3.8%).
+
+        NIIT = 3.8% x min(net_investment_income, MAGI - threshold).
+        NII includes interest, dividends, capital gains (if positive),
+        and rental income (if positive).
+        """
+        threshold = NIIT_THRESHOLD[self.filing_status]
+        if magi <= threshold:
+            return 0.0
+
+        nii = (
+            income.interest_income
+            + income.dividend_income
+            + income.capital_gains
+            + max(0, income.rental_income)
+        )
+        if nii <= 0:
+            return 0.0
+
+        return NIIT_RATE * min(nii, magi - threshold)
+
+    def calculate_qdcg_tax(
+        self, taxable_income: float,
+        qualified_dividends: float, net_ltcg: float,
+    ) -> tuple:
+        """Calculate tax using preferential QD/LTCG rates.
+
+        Splits taxable income into ordinary portion and preferential
+        portion (qualified dividends + net LTCG), then:
+        - Taxes the ordinary portion at regular brackets
+        - Taxes the preferential portion at 0%/15%/20%, stacking
+          on top of ordinary income
+
+        Returns (total_tax, ordinary_tax, qdcg_tax, bracket_breakdown).
+        """
+        preferential = min(qualified_dividends + max(0, net_ltcg), taxable_income)
+        if preferential <= 0:
+            tax, breakdown = self.calculate_progressive_tax(taxable_income)
+            return tax, tax, 0.0, breakdown
+
+        ordinary = max(0, taxable_income - preferential)
+
+        # Tax ordinary income at regular brackets
+        ordinary_tax, bracket_breakdown = self.calculate_progressive_tax(ordinary)
+
+        # Tax preferential income at LTCG rates, stacking on top of ordinary
+        ltcg_brackets = _get_ltcg_brackets(self.tax_year, self.filing_status)
+        qdcg_tax = 0.0
+        remaining = preferential
+        # The preferential income starts at `ordinary` on the income stack
+        stack_position = ordinary
+
+        for upper_limit, rate in ltcg_brackets:
+            if remaining <= 0:
+                break
+            # How much room is left in this LTCG bracket above our stack position
+            room = max(0, upper_limit - stack_position)
+            taxed_here = min(remaining, room)
+            if taxed_here > 0:
+                qdcg_tax += taxed_here * rate
+                stack_position += taxed_here
+                remaining -= taxed_here
+
+        return ordinary_tax + qdcg_tax, ordinary_tax, qdcg_tax, bracket_breakdown
+
     def calculate_additional_medicare_tax(self, wages: float) -> float:
         """Calculate 0.9% Additional Medicare Tax on W-2 wages exceeding threshold."""
         threshold = ADDITIONAL_MEDICARE_THRESHOLD[self.filing_status]
@@ -281,6 +414,7 @@ class FederalTaxCalculator:
         schedule_a_data: Optional[ScheduleAData] = None,
         schedule_e_summary: Optional[ScheduleESummary] = None,
         estimated_payments: float = 0.0,
+        medicare_wages: Optional[float] = None,
     ) -> TaxCalculation:
         """
         Calculate complete federal tax liability (Form 1040).
@@ -341,13 +475,29 @@ class FederalTaxCalculator:
         taxable_income = max(0, agi - deduction_amount)
 
         # --- Tax (Line 16) ---
-        income_tax, bracket_breakdown = self.calculate_progressive_tax(taxable_income)
+        # Use preferential QD/LTCG rates when applicable
+        qualified_dividends = income.qualified_dividends
+        net_ltcg = income.long_term_capital_gains + income.capital_gains  # capital_gains includes cap gain distributions
+        # Only use preferential calculation when there are QD or positive LTCG
+        if qualified_dividends > 0 or net_ltcg > 0:
+            income_tax, ordinary_tax, qdcg_tax, bracket_breakdown = (
+                self.calculate_qdcg_tax(taxable_income, qualified_dividends, net_ltcg)
+            )
+        else:
+            income_tax, bracket_breakdown = self.calculate_progressive_tax(taxable_income)
+            ordinary_tax = income_tax
+            qdcg_tax = 0.0
+
+        # Net Investment Income Tax (3.8%)
+        niit = self.calculate_niit(income, agi)
 
         # Additional Medicare Tax on W-2 wages (0.9% over threshold)
-        additional_medicare = self.calculate_additional_medicare_tax(income.wages)
+        # Use Medicare wages (W-2 box 5) if provided, otherwise fall back to box 1
+        amt_wages = medicare_wages if medicare_wages is not None else income.wages
+        additional_medicare = self.calculate_additional_medicare_tax(amt_wages)
 
         # Add SE tax (this goes on Schedule SE / Line 23)
-        tax_before_credits = income_tax + se_tax + additional_medicare
+        tax_before_credits = income_tax + se_tax + additional_medicare + niit
 
         # --- Credits (Lines 19-21) ---
         # Child Tax Credit
@@ -372,6 +522,9 @@ class FederalTaxCalculator:
             estimated_payments=round(estimated_payments, 2),
             self_employment_tax=round(se_tax, 2),
             additional_medicare_tax=round(additional_medicare, 2),
+            niit=round(niit, 2),
+            ordinary_income_tax=round(ordinary_tax, 2),
+            qualified_dividend_ltcg_tax=round(qdcg_tax, 2),
             deduction_method=deduction_method,
             bracket_breakdown=bracket_breakdown,
             schedule_e_summary=schedule_e_summary,
@@ -407,11 +560,12 @@ def calculate_federal_tax(
     schedule_a_data: Optional[ScheduleAData] = None,
     schedule_e_summary: Optional[ScheduleESummary] = None,
     estimated_payments: float = 0.0,
+    medicare_wages: Optional[float] = None,
 ) -> TaxCalculation:
     """Convenience function to calculate federal tax."""
     calculator = FederalTaxCalculator(filing_status, tax_year)
     return calculator.calculate(
         income, deductions, credits, federal_withheld, age, is_blind,
         num_qualifying_children, schedule_a_data, schedule_e_summary,
-        estimated_payments,
+        estimated_payments, medicare_wages,
     )

@@ -608,6 +608,312 @@ def test_additional_medicare_tax():
     print("  [PASS] Additional Medicare Tax included in tax_before_credits")
 
 
+def test_mortgage_proration():
+    """Test mortgage interest proration against $750K federal debt limit."""
+    print("\n" + "=" * 60)
+    print("Test: Mortgage Interest Proration (Debt Limit)")
+    print("=" * 60)
+
+    data = ScheduleAData(
+        mortgage_interest=20_000,
+        mortgage_balance=1_000_000,  # Over the $750K limit
+    )
+
+    calc = ScheduleACalculator(
+        filing_status=FilingStatus.MARRIED_FILING_JOINTLY,
+        standard_deduction=30_000,
+    )
+    result = calc.calculate(data=data, agi=200_000)
+
+    # Interest prorated: 20000 * 750000/1000000 = 15000
+    expected = 20_000 * 750_000 / 1_000_000
+    print(f"  Mortgage balance:       $1,000,000")
+    print(f"  Interest paid:          {fmt(20_000)}")
+    print(f"  Prorated interest:      {fmt(result.mortgage_interest_deduction)}")
+    assert abs(result.mortgage_interest_deduction - expected) < 0.01, \
+        f"Expected {fmt(expected)}, got {fmt(result.mortgage_interest_deduction)}"
+    print("  [PASS] Mortgage interest prorated by 750K/1M")
+
+    # Under limit - no proration
+    data_under = ScheduleAData(
+        mortgage_interest=15_000,
+        mortgage_balance=600_000,
+    )
+    result_under = calc.calculate(data=data_under, agi=200_000)
+    assert result_under.mortgage_interest_deduction == 15_000, \
+        f"Expected $15,000 (no proration), got {fmt(result_under.mortgage_interest_deduction)}"
+    print("  [PASS] No proration when balance under $750K")
+
+
+def test_niit():
+    """Test Net Investment Income Tax (3.8%)."""
+    print("\n" + "=" * 60)
+    print("Test: Net Investment Income Tax (NIIT)")
+    print("=" * 60)
+
+    calculator = FederalTaxCalculator(FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2025)
+
+    # MFJ with $260K AGI and $60K NII
+    income = TaxableIncome(
+        wages=200_000,
+        interest_income=30_000,
+        dividend_income=20_000,
+        capital_gains=10_000,
+    )
+    magi = 260_000  # wages + interest + dividends + cap gains
+
+    niit = calculator.calculate_niit(income, magi)
+    # NIIT = 3.8% * min(NII=$60K, MAGI-threshold=$260K-$250K=$10K)
+    expected = 0.038 * 10_000  # $380
+    print(f"  MAGI:     {fmt(magi)}")
+    print(f"  NII:      {fmt(60_000)}")
+    print(f"  NIIT:     {fmt(niit)}")
+    assert abs(niit - expected) < 0.01, f"Expected {fmt(expected)}, got {fmt(niit)}"
+    print("  [PASS] NIIT = 3.8% x min(NII, MAGI-threshold) = $380")
+
+    # Below threshold - no NIIT
+    niit_low = calculator.calculate_niit(
+        TaxableIncome(wages=200_000, interest_income=5_000), 205_000
+    )
+    assert niit_low == 0.0, f"Expected $0 NIIT below threshold, got {fmt(niit_low)}"
+    print("  [PASS] No NIIT when MAGI below threshold")
+
+
+def test_qdcg_preferential_rates():
+    """Test qualified dividends / LTCG taxed at preferential rates."""
+    print("\n" + "=" * 60)
+    print("Test: QD/LTCG Preferential Rate Taxation")
+    print("=" * 60)
+
+    calculator = FederalTaxCalculator(FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2025)
+
+    # $150K taxable income with $20K QD - should pay less than all ordinary
+    income_with_qd = TaxableIncome(
+        wages=130_000,
+        dividend_income=20_000,
+        qualified_dividends=20_000,
+    )
+    deductions = Deductions(use_standard=True)
+    credits = TaxCredits()
+
+    result_qd = calculator.calculate(
+        income=income_with_qd, deductions=deductions, credits=credits,
+        federal_withheld=0,
+    )
+
+    # Same income but ALL ordinary (no QD)
+    income_ordinary = TaxableIncome(wages=150_000)
+    result_ord = calculator.calculate(
+        income=income_ordinary, deductions=deductions, credits=credits,
+        federal_withheld=0,
+    )
+
+    # Both have same taxable income
+    assert result_qd.taxable_income == result_ord.taxable_income, \
+        f"Taxable incomes should match: {result_qd.taxable_income} vs {result_ord.taxable_income}"
+
+    print(f"  Taxable income:         {fmt(result_qd.taxable_income)}")
+    print(f"  Tax with QD:            {fmt(result_qd.ordinary_income_tax + result_qd.qualified_dividend_ltcg_tax)}")
+    print(f"  Tax all ordinary:       {fmt(result_ord.ordinary_income_tax)}")
+    print(f"  QD/LTCG tax component:  {fmt(result_qd.qualified_dividend_ltcg_tax)}")
+
+    # Tax with QD should be less than all-ordinary
+    qd_income_tax = result_qd.ordinary_income_tax + result_qd.qualified_dividend_ltcg_tax
+    ord_income_tax = result_ord.ordinary_income_tax
+    assert qd_income_tax < ord_income_tax, \
+        f"QD tax ({fmt(qd_income_tax)}) should be less than ordinary ({fmt(ord_income_tax)})"
+    print("  [PASS] QD preferential rates reduce total tax")
+
+
+def test_1099r_fields():
+    """Test 1099-R distribution_code and taxable_amount_not_determined fields."""
+    print("\n" + "=" * 60)
+    print("Test: 1099-R Distribution Code and Taxable Amount Fields")
+    print("=" * 60)
+
+    from src.models import Form1099R
+
+    # Normal distribution with known taxable amount
+    r1 = Form1099R(
+        payer_name="Retirement Fund",
+        gross_distribution=50_000,
+        taxable_amount=50_000,
+        distribution_code="7",  # Normal distribution
+    )
+    assert r1.distribution_code == "7"
+    assert r1.taxable_amount_not_determined is False
+    print(f"  Distribution code: {r1.distribution_code}")
+    print(f"  Taxable not determined: {r1.taxable_amount_not_determined}")
+    print("  [PASS] Normal 1099-R fields correct")
+
+    # Distribution where taxable amount is not determined
+    r2 = Form1099R(
+        payer_name="Pension Plan",
+        gross_distribution=100_000,
+        taxable_amount=100_000,
+        taxable_amount_not_determined=True,
+        distribution_code="1",  # Early distribution
+    )
+    assert r2.taxable_amount_not_determined is True
+    assert r2.distribution_code == "1"
+    print(f"  Early dist code: {r2.distribution_code}")
+    print(f"  Taxable not determined: {r2.taxable_amount_not_determined}")
+    print("  [PASS] 1099-R with taxable_amount_not_determined flag")
+
+
+def test_salt_federal_vs_ca():
+    """Test SALT: federal caps at $10K, CA excludes state income tax with no cap."""
+    print("\n" + "=" * 60)
+    print("Test: SALT - Federal Cap vs CA No Cap")
+    print("=" * 60)
+
+    data = ScheduleAData(
+        state_income_tax_paid=25_000,
+        real_estate_taxes=15_000,
+        vehicle_registrations=[
+            CAVehicleRegistration(vehicle_license_fee=500),
+        ],
+        mortgage_interest=20_000,
+    )
+
+    # Federal: SALT = 25000 + 15000 + 500 = 40500, capped at 10000
+    fed_calc = ScheduleACalculator(
+        filing_status=FilingStatus.MARRIED_FILING_JOINTLY,
+        standard_deduction=30_000,
+    )
+    fed_result = fed_calc.calculate(data=data, agi=300_000)
+
+    # CA: SALT = 15000 + 500 = 15500 (excludes state income tax, no cap)
+    ca_result = ScheduleACalculator.calculate_ca_itemized(
+        data=data, agi=300_000, ca_standard_deduction=10_726,
+        filing_status=FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2025,
+    )
+
+    print(f"  Federal SALT:  {fmt(fed_result.salt_deduction)} (capped at $10K)")
+    print(f"  Fed uncapped:  {fmt(fed_result.salt_uncapped)} (incl state income tax)")
+    print(f"  CA SALT:       {fmt(ca_result.salt_deduction)} (no cap, excl state tax)")
+
+    assert fed_result.salt_deduction == 10_000, \
+        f"Federal SALT should be $10,000, got {fmt(fed_result.salt_deduction)}"
+    assert fed_result.salt_uncapped == 40_500, \
+        f"Federal uncapped SALT should be $40,500, got {fmt(fed_result.salt_uncapped)}"
+    assert ca_result.salt_deduction == 15_500, \
+        f"CA SALT should be $15,500, got {fmt(ca_result.salt_deduction)}"
+    print("  [PASS] Federal SALT capped at $10K")
+    print("  [PASS] CA SALT excludes state income tax, no cap")
+
+    # Verify the DIFFERENCE is exactly the state income tax (design, not bug)
+    diff = fed_result.salt_uncapped - ca_result.salt_deduction
+    assert diff == 25_000, f"Fed-CA SALT diff should equal state income tax ($25K), got {fmt(diff)}"
+    print("  [PASS] Fed uncapped SALT - CA SALT = state income tax (by design)")
+
+
+def test_niit_includes_all_nii():
+    """Test NIIT base includes interest, dividends, cap gains, and rental income."""
+    print("\n" + "=" * 60)
+    print("Test: NIIT includes all NII components")
+    print("=" * 60)
+
+    calculator = FederalTaxCalculator(FilingStatus.MARRIED_FILING_JOINTLY, tax_year=2025)
+
+    income = TaxableIncome(
+        wages=200_000,
+        interest_income=10_000,
+        dividend_income=15_000,
+        qualified_dividends=12_000,
+        capital_gains=8_000,
+        rental_income=5_000,
+    )
+    magi = income.total_income  # 238000
+
+    niit = calculator.calculate_niit(income, magi)
+    # NII = interest(10K) + dividends(15K) + cap_gains(8K) + rental(5K) = 38K
+    # But MAGI - threshold = 238K - 250K = -12K (below threshold)
+    assert niit == 0.0, f"Expected $0 NIIT (below threshold), got {fmt(niit)}"
+    print(f"  MAGI $238K < $250K threshold: NIIT = {fmt(niit)}")
+    print("  [PASS] No NIIT below threshold even with NII")
+
+    # Now push over threshold with higher wages
+    income2 = TaxableIncome(
+        wages=230_000,
+        interest_income=10_000,
+        dividend_income=15_000,
+        qualified_dividends=12_000,
+        capital_gains=8_000,
+        rental_income=5_000,
+    )
+    magi2 = income2.total_income  # 268000
+    niit2 = calculator.calculate_niit(income2, magi2)
+    # NII = 10K + 15K + 8K + 5K = 38K
+    # MAGI - threshold = 268K - 250K = 18K
+    # NIIT = 3.8% * min(38K, 18K) = 3.8% * 18K = 684
+    expected = 0.038 * 18_000
+    print(f"  MAGI $268K, NII includes: int=$10K + div=$15K + cg=$8K + rent=$5K = $38K")
+    print(f"  NIIT = 3.8% * min($38K, $18K) = {fmt(expected)}")
+    assert abs(niit2 - expected) < 0.01, f"Expected {fmt(expected)}, got {fmt(niit2)}"
+    print("  [PASS] NIIT correctly includes all NII components")
+
+    # Negative cap gains reduce NII; negative rental floored to 0
+    income3 = TaxableIncome(
+        wages=270_000,
+        interest_income=10_000,
+        dividend_income=5_000,
+        capital_gains=-3_000,
+        rental_income=-8_000,
+    )
+    magi3 = income3.total_income  # 274000
+    niit3 = calculator.calculate_niit(income3, magi3)
+    # NII = 10K + 5K + (-3K) + max(0,-8K) = 12K
+    # MAGI - threshold = 274K - 250K = 24K
+    # NIIT = 3.8% * min(12K, 24K) = 3.8% * 12K = 456
+    expected3 = 0.038 * 12_000
+    print(f"  Cap losses reduce NII, rental losses floored to 0: NII = $12K")
+    print(f"  NIIT = {fmt(niit3)}")
+    assert abs(niit3 - expected3) < 0.01, f"Expected {fmt(expected3)}, got {fmt(niit3)}"
+    print("  [PASS] Capital losses reduce NII; rental losses floored to 0")
+
+
+def test_mortgage_proration_extreme():
+    """Test mortgage proration catches extreme balance values."""
+    print("\n" + "=" * 60)
+    print("Test: Mortgage Proration - Extreme Balance (Config Error Detection)")
+    print("=" * 60)
+
+    # Simulate a config error: $270M balance instead of $2.7M
+    data_extreme = ScheduleAData(
+        mortgage_interest=129_530,
+        mortgage_balance=270_000_000,  # $270M - clearly wrong
+    )
+
+    calc = ScheduleACalculator(
+        filing_status=FilingStatus.MARRIED_FILING_JOINTLY,
+        standard_deduction=30_000,
+    )
+    result = calc.calculate(data=data_extreme, agi=1_500_000)
+
+    # Federal: 129530 * 750K/270M = 359.81
+    expected_fed = 129_530 * 750_000 / 270_000_000
+    print(f"  Balance $270M (likely config error)")
+    print(f"  Raw interest: {fmt(129_530)}")
+    print(f"  Prorated:     {fmt(result.mortgage_interest_deduction)}")
+    print(f"  Ratio:        {750_000/270_000_000*100:.4f}%")
+    assert abs(result.mortgage_interest_deduction - expected_fed) < 1, \
+        f"Expected {fmt(expected_fed)}, got {fmt(result.mortgage_interest_deduction)}"
+    print("  [PASS] Proration math is correct (even with extreme balance)")
+
+    # Now with correct $2.7M balance
+    data_correct = ScheduleAData(
+        mortgage_interest=129_530,
+        mortgage_balance=2_700_000,
+    )
+    result2 = calc.calculate(data=data_correct, agi=1_500_000)
+    expected_correct = 129_530 * 750_000 / 2_700_000
+    print(f"\n  Corrected balance $2.7M:")
+    print(f"  Prorated:     {fmt(result2.mortgage_interest_deduction)}")
+    assert abs(result2.mortgage_interest_deduction - expected_correct) < 1
+    print("  [PASS] $2.7M balance gives reasonable proration")
+
+
 if __name__ == "__main__":
     test_federal_tax()
     test_california_tax()
@@ -626,6 +932,13 @@ if __name__ == "__main__":
     test_capital_loss_carryover()
     test_ca_itemized_limitation()
     test_additional_medicare_tax()
+    test_mortgage_proration()
+    test_niit()
+    test_niit_includes_all_nii()
+    test_qdcg_preferential_rates()
+    test_1099r_fields()
+    test_salt_federal_vs_ca()
+    test_mortgage_proration_extreme()
 
     print("\n" + "=" * 60)
     print("  ALL TESTS PASSED!")

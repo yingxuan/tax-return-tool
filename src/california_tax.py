@@ -129,6 +129,24 @@ CA_STANDARD_DEDUCTION = {
 # Exemption credit per exemption
 CA_EXEMPTION_CREDIT = {2024: 140, 2025: 144}
 
+# Exemption credit phaseout thresholds (federal AGI)
+# Credit reduces by $6 per $2,500 (or fraction) of AGI over threshold
+CA_EXEMPTION_PHASEOUT = {
+    2024: {
+        FilingStatus.SINGLE: 244_860,
+        FilingStatus.MARRIED_FILING_JOINTLY: 489_719,
+        FilingStatus.MARRIED_FILING_SEPARATELY: 244_860,
+        FilingStatus.HEAD_OF_HOUSEHOLD: 367_290,
+    },
+    2025: {
+        FilingStatus.SINGLE: 252_813,
+        FilingStatus.MARRIED_FILING_JOINTLY: 505_626,
+        FilingStatus.MARRIED_FILING_SEPARATELY: 252_813,
+        FilingStatus.HEAD_OF_HOUSEHOLD: 379_220,
+    },
+}
+CA_EXEMPTION_PHASEOUT_PER_2500 = 6  # $6 reduction per $2,500 excess
+
 # Mental Health Services Tax (Prop 63)
 CA_MENTAL_HEALTH_THRESHOLD = 1_000_000
 CA_MENTAL_HEALTH_RATE = 0.01
@@ -231,9 +249,33 @@ class CaliforniaTaxCalculator:
             return (taxable_income - CA_MENTAL_HEALTH_THRESHOLD) * CA_MENTAL_HEALTH_RATE
         return 0.0
 
-    def calculate_exemption_credit(self, num_exemptions: int = 1) -> float:
+    def calculate_exemption_credit(
+        self, num_exemptions: int = 1, federal_agi: float = 0.0,
+    ) -> float:
+        """Calculate CA exemption credit with phaseout for high incomes.
+
+        The credit reduces by $6 for each $2,500 (or fraction thereof)
+        of federal AGI exceeding the phaseout threshold.
+        """
         credit_per = CA_EXEMPTION_CREDIT.get(self.tax_year, 144)
-        return credit_per * num_exemptions
+        base_credit = credit_per * num_exemptions
+
+        if federal_agi <= 0 or base_credit <= 0:
+            return base_credit
+
+        thresholds = CA_EXEMPTION_PHASEOUT.get(
+            self.tax_year, CA_EXEMPTION_PHASEOUT[2025]
+        )
+        threshold = thresholds.get(self.filing_status, thresholds[FilingStatus.SINGLE])
+
+        if federal_agi <= threshold:
+            return base_credit
+
+        import math
+        excess = federal_agi - threshold
+        increments = math.ceil(excess / 2_500)
+        reduction = increments * CA_EXEMPTION_PHASEOUT_PER_2500
+        return max(0, base_credit - reduction)
 
     def calculate_renters_credit(
         self, ca_agi: float, is_renter: bool
@@ -290,6 +332,8 @@ class CaliforniaTaxCalculator:
         schedule_a_data: Optional[ScheduleAData] = None,
         schedule_e_summary: Optional[ScheduleESummary] = None,
         estimated_payments: float = 0.0,
+        us_treasury_interest: float = 0.0,
+        federal_agi: float = 0.0,
     ) -> TaxCalculation:
         """
         Calculate complete California tax liability (Form 540).
@@ -309,7 +353,8 @@ class CaliforniaTaxCalculator:
             Complete California TaxCalculation result.
         """
         # --- CA Gross Income ---
-        gross_income = income.total_income
+        # Subtract US Treasury interest (exempt from CA tax)
+        gross_income = income.total_income - us_treasury_interest
 
         # --- CA Adjustments ---
         adjustments = self.apply_ca_adjustments(income)
@@ -354,7 +399,7 @@ class CaliforniaTaxCalculator:
         tax_before_credits = base_tax + mental_health_tax
 
         # --- CA Credits ---
-        exemption_credit = self.calculate_exemption_credit(num_exemptions)
+        exemption_credit = self.calculate_exemption_credit(num_exemptions, federal_agi)
         renters_credit = self.calculate_renters_credit(ca_agi, is_renter)
         total_credits = credits.total_credits + exemption_credit + renters_credit
 
@@ -407,12 +452,15 @@ def calculate_california_tax(
     schedule_a_data: Optional[ScheduleAData] = None,
     schedule_e_summary: Optional[ScheduleESummary] = None,
     estimated_payments: float = 0.0,
+    us_treasury_interest: float = 0.0,
+    federal_agi: float = 0.0,
 ) -> TaxCalculation:
     """Convenience function to calculate California tax."""
     calculator = CaliforniaTaxCalculator(filing_status, tax_year)
     return calculator.calculate(
         income, deductions, credits, state_withheld, num_exemptions,
         is_renter, schedule_a_data, schedule_e_summary, estimated_payments,
+        us_treasury_interest, federal_agi,
     )
 
 

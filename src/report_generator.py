@@ -65,8 +65,12 @@ def generate_schedule_a_report(result: ScheduleAResult, jurisdiction: str = "Fed
         lines.append(_line("State/Local Taxes (SALT, capped at $10,000)", result.salt_deduction))
         if result.salt_uncapped > result.salt_deduction:
             lines.append(_line("  (Uncapped SALT would be)", result.salt_uncapped))
+            lines.append("    (includes: state income tax withholding + property tax + VLF)")
     else:
-        lines.append(_line("Taxes Paid (no SALT cap in CA)", result.salt_deduction))
+        # CA does NOT allow deducting CA state income tax on the CA return.
+        # CA SALT = real estate taxes + personal property taxes + VLF only.
+        lines.append(_line("Property & Personal Prop. Taxes (no SALT cap)", result.salt_deduction))
+        lines.append("    (CA excludes state income tax; only real estate tax + VLF)")
 
     lines.append(_line("Mortgage Interest", result.mortgage_interest_deduction))
     lines.append(_line("Charitable Contributions", result.charitable_deduction))
@@ -128,15 +132,23 @@ def generate_federal_report(calc: TaxCalculation) -> str:
             rate_pct = f"{b['rate']*100:.1f}%"
             lines.append(f"    {b['bracket']:>30}  @{rate_pct:>6}  = {fmt(b['tax']):>12}")
 
-    income_tax = calc.tax_before_credits - calc.self_employment_tax - calc.additional_medicare_tax
+    income_tax = calc.tax_before_credits - calc.self_employment_tax - calc.additional_medicare_tax - calc.niit
     lines.append("\n  " + "-" * 68)
-    lines.append(_line("16.  Income Tax", income_tax))
+
+    if calc.qualified_dividend_ltcg_tax > 0:
+        lines.append(_line("16.  Ordinary Income Tax", calc.ordinary_income_tax))
+        lines.append(_line("      QD/LTCG Tax (preferential rates)", calc.qualified_dividend_ltcg_tax))
+    else:
+        lines.append(_line("16.  Income Tax", income_tax))
 
     if calc.self_employment_tax > 0:
         lines.append(_line("23.  Self-Employment Tax", calc.self_employment_tax))
 
     if calc.additional_medicare_tax > 0:
         lines.append(_line("      Additional Medicare Tax (0.9%)", calc.additional_medicare_tax))
+
+    if calc.niit > 0:
+        lines.append(_line("      Net Investment Income Tax (3.8%)", calc.niit))
 
     lines.append(_line("24.  Tax Before Credits", calc.tax_before_credits))
 

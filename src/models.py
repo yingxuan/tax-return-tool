@@ -58,6 +58,7 @@ class Form1099Int:
     """1099-INT form data for interest income."""
     payer_name: str
     interest_income: float = 0.0  # Box 1
+    us_treasury_interest: float = 0.0  # Box 3: Interest on U.S. Treasury obligations
     federal_withheld: float = 0.0  # Box 4
 
 
@@ -68,6 +69,7 @@ class Form1099Div:
     ordinary_dividends: float = 0.0  # Box 1a
     qualified_dividends: float = 0.0  # Box 1b
     capital_gain_distributions: float = 0.0  # Box 2a
+    us_treasury_interest: float = 0.0  # Exempt-interest dividends from US Treasury
     federal_withheld: float = 0.0  # Box 4
 
 
@@ -94,7 +96,9 @@ class Form1099R:
     payer_name: str
     gross_distribution: float = 0.0  # Box 1
     taxable_amount: float = 0.0  # Box 2a
+    taxable_amount_not_determined: bool = False  # Box 2b checkbox
     federal_withheld: float = 0.0  # Box 4
+    distribution_code: str = ""  # Box 7
     state_withheld: float = 0.0  # Box 12
 
 
@@ -436,6 +440,11 @@ class TaxCalculation:
     self_employment_tax: float = 0.0
     additional_medicare_tax: float = 0.0  # 0.9% on wages over threshold
 
+    # NIIT and QD/LTCG breakdown
+    niit: float = 0.0
+    ordinary_income_tax: float = 0.0
+    qualified_dividend_ltcg_tax: float = 0.0
+
     # Detailed breakdown for report
     deduction_method: str = "standard"  # "standard" or "itemized"
     bracket_breakdown: list = field(default_factory=list)
@@ -542,6 +551,18 @@ class TaxReturn:
             p.amount for p in self.estimated_payments
             if p.jurisdiction == "california"
         )
+
+    @property
+    def total_medicare_wages(self) -> float:
+        """Total Medicare wages from W-2 Box 5."""
+        return sum(w2.medicare_wages for w2 in self.w2_forms)
+
+    @property
+    def total_us_treasury_interest(self) -> float:
+        """Total US Treasury interest (state-exempt) from 1099-INT/DIV forms."""
+        total = sum(f.us_treasury_interest for f in self.form_1099_int)
+        total += sum(f.us_treasury_interest for f in self.form_1099_div)
+        return total
 
     @property
     def total_dependent_care_benefits(self) -> float:

@@ -26,6 +26,7 @@ class TaxProfileConfig:
     rental_1098_keywords: List[str] = field(default_factory=list)
     capital_loss_carryover: float = 0.0
     personal_mortgage_balance: float = 0.0  # Outstanding principal for debt limit
+    us_treasury_interest: float = 0.0  # US Treasury interest (state-exempt)
 
 
 def load_config(path: str) -> Optional[TaxProfileConfig]:
@@ -84,4 +85,5 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         ],
         capital_loss_carryover=float(raw.get("capital_loss_carryover", 0.0)),
         personal_mortgage_balance=float(raw.get("personal_mortgage_balance", 0.0)),
+        us_treasury_interest=float(raw.get("us_treasury_interest", 0.0)),
     )

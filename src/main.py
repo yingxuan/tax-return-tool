@@ -19,7 +19,7 @@ from .california_tax import CaliforniaTaxCalculator
 from .schedule_e import ScheduleECalculator
 from .schedule_a import ScheduleACalculator
 from .report_generator import generate_full_report
-from .file_watcher import TaxDocumentWatcher, EXTRACTABLE_CATEGORIES
+from .file_watcher import TaxDocumentWatcher
 from .config_loader import load_config, TaxProfileConfig
 
 
@@ -95,18 +95,44 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
         # Flow net rental income into TaxableIncome
         income.rental_income = schedule_e_summary.total_net_rental_income
 
+        # Passive Activity Loss Limitations (Form 8582)
+        # The $25,000 special allowance for rental real estate phases out
+        # completely at MAGI > $150K.  Estimate MAGI without rental loss.
+        if income.rental_income < 0:
+            preliminary_agi = income.total_income - income.rental_income
+            if preliminary_agi > 150_000:
+                income.rental_income = 0  # Disallow passive rental losses
+
     # ---------------------------------------------------------------
     # Step 2: Prepare Schedule A data
     # ---------------------------------------------------------------
     schedule_a_data = tax_return.schedule_a_data
 
-    # If no explicit Schedule A data but we have 1098 forms, auto-populate
+    # If no explicit Schedule A data, auto-populate from source documents.
     # Only use personal (non-rental) mortgage interest for Schedule A;
     # rental mortgage interest flows through Schedule E instead.
-    if not schedule_a_data and tax_return.form_1098:
-        schedule_a_data = ScheduleAData(
-            mortgage_interest=tax_return.total_personal_mortgage_interest,
+    if not schedule_a_data:
+        # State income tax paid = W-2 state withholding + 1099-R state withholding
+        state_income_tax_paid = (
+            sum(w2.state_withheld for w2 in tax_return.w2_forms)
+            + sum(f.state_withheld for f in tax_return.form_1099_r)
+            + tax_return.total_state_estimated_payments
         )
+
+        # Property taxes from personal (non-rental) 1098 forms
+        real_estate_taxes = sum(
+            f.property_taxes for f in tax_return.form_1098 if not f.is_rental
+        )
+
+        mortgage_interest = tax_return.total_personal_mortgage_interest
+
+        # Only create Schedule A data if we have meaningful inputs
+        if mortgage_interest > 0 or state_income_tax_paid > 0 or real_estate_taxes > 0:
+            schedule_a_data = ScheduleAData(
+                state_income_tax_paid=state_income_tax_paid,
+                real_estate_taxes=real_estate_taxes,
+                mortgage_interest=mortgage_interest,
+            )
 
     # ---------------------------------------------------------------
     # Step 3: Federal Tax (Form 1040)
@@ -119,6 +145,9 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
         tax_year=tax_year,
     )
 
+    # Use Medicare wages (W-2 box 5) for Additional Medicare Tax if available
+    medicare_wages = tax_return.total_medicare_wages or None
+
     tax_return.federal_calculation = fed_calculator.calculate(
         income=income,
         deductions=deductions,
@@ -130,6 +159,7 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
         schedule_a_data=schedule_a_data,
         schedule_e_summary=schedule_e_summary,
         estimated_payments=tax_return.total_federal_estimated_payments,
+        medicare_wages=medicare_wages,
     )
 
     # ---------------------------------------------------------------
@@ -141,6 +171,9 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
     )
     ca_credits = TaxCredits()  # CA-specific credits are separate
 
+    # Pass federal AGI for CA exemption credit phaseout
+    federal_agi = tax_return.federal_calculation.adjusted_gross_income
+
     tax_return.state_calculation = ca_calculator.calculate(
         income=income,
         deductions=deductions,
@@ -151,6 +184,8 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
         schedule_a_data=schedule_a_data,
         schedule_e_summary=schedule_e_summary,
         estimated_payments=tax_return.total_state_estimated_payments,
+        us_treasury_interest=tax_return.total_us_treasury_interest,
+        federal_agi=federal_agi,
     )
 
     return tax_return
@@ -207,19 +242,18 @@ def process_tax_documents(
         # Use folder-aware categorization to print inventory
         summary = scan_and_categorize_folder(doc_folder)
 
-        # Collect only extractable files for parsing
-        extractable_files = []
+        # Collect all files for parsing (OCR/text extraction)
+        all_files = []
         for category, files in summary.items():
-            if category in EXTRACTABLE_CATEGORIES:
-                for f in files:
-                    extractable_files.append(f.path)
-                    category_hints[f.path] = category
+            for f in files:
+                all_files.append(f.path)
+                category_hints[f.path] = category
 
-        if extractable_files:
-            print(f"\nProcessing {len(extractable_files)} auto-extractable document(s)...")
-            parsed_docs = parser.parse_multiple(extractable_files)
+        if all_files:
+            print(f"\nProcessing {len(all_files)} document(s) through OCR/parsing...")
+            parsed_docs = parser.parse_multiple(all_files)
         else:
-            print("\nNo auto-extractable documents found.")
+            print("\nNo documents found.")
     elif local_files:
         print("\nProcessing local files...")
         parsed_docs = parser.parse_multiple(local_files)
@@ -277,6 +311,17 @@ def process_tax_documents(
                             break
                 tax_return.form_1098.append(form)
 
+    # Apply US Treasury interest from config (state-exempt)
+    if config and config.us_treasury_interest > 0:
+        # Track as a synthetic 1099-INT with treasury interest only
+        # (the interest is already included in income from actual 1099 forms)
+        treasury_marker = Form1099Int(
+            payer_name="US Treasury (config)",
+            interest_income=0.0,  # Already counted in actual 1099-INT
+            us_treasury_interest=config.us_treasury_interest,
+        )
+        tax_return.form_1099_int.append(treasury_marker)
+
     # Apply capital loss carryover from prior year (capped at $3K for MFJ/Single, $1.5K for MFS)
     if config and config.capital_loss_carryover > 0:
         if taxpayer.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY:
@@ -286,10 +331,99 @@ def process_tax_documents(
         loss = min(config.capital_loss_carryover, cap)
         income.capital_gains -= loss
 
+    # Set mortgage balance from config on schedule_a_data
+    if config and config.personal_mortgage_balance > 0:
+        balance = config.personal_mortgage_balance
+
+        # Validate: a personal mortgage balance over $10M is almost certainly a
+        # config error (e.g. value entered in cents instead of dollars, or
+        # extra zeros).  Warn loudly but still proceed.
+        if balance > 10_000_000:
+            print(
+                f"\n  *** WARNING: personal_mortgage_balance = ${balance:,.0f} "
+                f"seems unrealistically high. ***"
+                f"\n  *** If this is in cents, divide by 100.  A $2.7M balance "
+                f"should be entered as 2700000, not 270000000. ***"
+                f"\n  *** Current value causes mortgage interest to be prorated "
+                f"to {750_000 / balance * 100:.2f}% (federal) / "
+                f"{1_000_000 / balance * 100:.2f}% (CA). ***\n"
+            )
+
+        if not tax_return.schedule_a_data:
+            # Pre-build schedule_a_data so process_tax_return uses it
+            state_income_tax_paid = (
+                sum(w2.state_withheld for w2 in tax_return.w2_forms)
+                + sum(f.state_withheld for f in tax_return.form_1099_r)
+                + tax_return.total_state_estimated_payments
+            )
+            real_estate_taxes = sum(
+                f.property_taxes for f in tax_return.form_1098 if not f.is_rental
+            )
+            tax_return.schedule_a_data = ScheduleAData(
+                state_income_tax_paid=state_income_tax_paid,
+                real_estate_taxes=real_estate_taxes,
+                mortgage_interest=tax_return.total_personal_mortgage_interest,
+                mortgage_balance=balance,
+            )
+        else:
+            tax_return.schedule_a_data.mortgage_balance = balance
+
+    # Print data ingestion summary for debugging
+    _print_ingestion_summary(tax_return, config)
+
     # Calculate
     print("\nCalculating taxes...")
     tax_return = process_tax_return(tax_return)
     return tax_return
+
+
+def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
+    """Print a summary of ingested data to help catch parsing issues."""
+    fmt = lambda x: f"${x:,.2f}"
+    inc = tax_return.income
+
+    print("\n" + "-" * 60)
+    print("  DATA INGESTION SUMMARY")
+    print("-" * 60)
+    print(f"  W-2 forms:       {len(tax_return.w2_forms)}")
+    print(f"  1099-INT forms:  {len(tax_return.form_1099_int)}")
+    print(f"  1099-DIV forms:  {len(tax_return.form_1099_div)}")
+    print(f"  1099-NEC forms:  {len(tax_return.form_1099_nec)}")
+    print(f"  1099-R forms:    {len(tax_return.form_1099_r)}")
+    print(f"  1098 forms:      {len(tax_return.form_1098)}"
+          f" ({sum(1 for f in tax_return.form_1098 if not f.is_rental)} personal,"
+          f" {sum(1 for f in tax_return.form_1098 if f.is_rental)} rental)")
+
+    print(f"\n  Wages:                     {fmt(inc.wages)}")
+    print(f"  Interest income:           {fmt(inc.interest_income)}")
+    print(f"  Ordinary dividends:        {fmt(inc.dividend_income)}")
+    print(f"  Qualified dividends:       {fmt(inc.qualified_dividends)}")
+    print(f"  Capital gains:             {fmt(inc.capital_gains)}")
+    print(f"  Self-employment:           {fmt(inc.self_employment_income)}")
+    print(f"  Retirement:                {fmt(inc.retirement_income)}")
+
+    pers_int = tax_return.total_personal_mortgage_interest
+    rent_int = tax_return.total_rental_mortgage_interest
+    pers_prop_tax = sum(f.property_taxes for f in tax_return.form_1098 if not f.is_rental)
+    print(f"\n  Personal mortgage interest:{fmt(pers_int)}")
+    print(f"  Rental mortgage interest:  {fmt(rent_int)}")
+    print(f"  Personal property taxes:   {fmt(pers_prop_tax)}")
+    print(f"  State withholding (W-2):   {fmt(sum(w.state_withheld for w in tax_return.w2_forms))}")
+    print(f"  State withholding (1099-R):{fmt(sum(f.state_withheld for f in tax_return.form_1099_r))}")
+
+    if config and config.personal_mortgage_balance > 0:
+        bal = config.personal_mortgage_balance
+        print(f"\n  Mortgage balance (config): {fmt(bal)}")
+        if bal > 750_000:
+            fed_pct = 750_000 / bal * 100
+            ca_pct = min(1_000_000 / bal, 1.0) * 100
+            print(f"  Federal proration:         {fed_pct:.2f}%  -> {fmt(pers_int * 750_000 / bal)}")
+            print(f"  CA proration:              {ca_pct:.2f}%  -> {fmt(pers_int * min(1_000_000 / bal, 1.0))}")
+
+    if inc.dividend_income == 0 and inc.qualified_dividends == 0:
+        print("\n  *** NOTE: No dividend income detected. If you have 1099-DIV")
+        print("  *** documents, check that OCR/parsing extracted them correctly.")
+    print("-" * 60)
 
 
 def run_demo():
