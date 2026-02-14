@@ -27,6 +27,13 @@ class TaxProfileConfig:
     capital_loss_carryover: float = 0.0
     personal_mortgage_balance: float = 0.0  # Outstanding principal for debt limit
     us_treasury_interest: float = 0.0  # US Treasury interest (state-exempt)
+    charitable_contributions: float = 0.0  # Cash charitable contributions (Schedule A)
+    ca_misc_deductions: float = 0.0  # CA-only misc deductions (gross, before 2% AGI floor)
+    federal_estimated_payments: float = 0.0  # Federal estimated tax payments made
+    ca_estimated_payments: float = 0.0  # CA estimated tax payments made
+    federal_withheld_adjustment: float = 0.0  # Correction to auto-extracted federal withholding
+    other_income: float = 0.0  # Other income (1099-MISC Box 3, jury duty, etc.)
+    dividend_adjustment: float = 0.0  # Correction to auto-extracted dividend income
 
 
 def load_config(path: str) -> Optional[TaxProfileConfig]:
@@ -86,4 +93,11 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         capital_loss_carryover=float(raw.get("capital_loss_carryover", 0.0)),
         personal_mortgage_balance=float(raw.get("personal_mortgage_balance", 0.0)),
         us_treasury_interest=float(raw.get("us_treasury_interest", 0.0)),
+        charitable_contributions=float(raw.get("charitable_contributions", 0.0)),
+        ca_misc_deductions=float(raw.get("ca_misc_deductions", 0.0)),
+        federal_estimated_payments=float(raw.get("federal_estimated_payments", 0.0)),
+        ca_estimated_payments=float(raw.get("ca_estimated_payments", 0.0)),
+        federal_withheld_adjustment=float(raw.get("federal_withheld_adjustment", 0.0)),
+        other_income=float(raw.get("other_income", 0.0)),
+        dividend_adjustment=float(raw.get("dividend_adjustment", 0.0)),
     )

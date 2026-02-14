@@ -76,6 +76,8 @@ def generate_schedule_a_report(result: ScheduleAResult, jurisdiction: str = "Fed
     lines.append(_line("Charitable Contributions", result.charitable_deduction))
     if result.other_deductions > 0:
         lines.append(_line("Other Deductions", result.other_deductions))
+    if result.ca_misc_deduction > 0:
+        lines.append(_line("Misc. Deductions (CA-only, after 2% AGI floor)", result.ca_misc_deduction))
     if result.ca_itemized_limitation > 0:
         lines.append(_line("CA Itemized Deduction Limitation", -result.ca_itemized_limitation))
     lines.append("  " + "-" * 68)

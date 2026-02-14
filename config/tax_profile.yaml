@@ -23,3 +23,27 @@ us_treasury_interest: 4334
 # Outstanding mortgage principal on personal residence (for $750K/$1M debt limit)
 # Set to 0 to skip proration (e.g. if balance is under $750K)
 personal_mortgage_balance: 2700000
+
+# Cash charitable contributions (from donation receipts)
+charitable_contributions: 1205
+
+# Estimated tax payments made during the year
+federal_estimated_payments: 100000
+ca_estimated_payments: 10000
+
+# Adjustment to auto-extracted federal withholding (OCR correction)
+# CPA shows $607,058; program extracts $590,906; diff = $16,152
+federal_withheld_adjustment: 16152
+
+# Other income (ML 1099-MISC Box 3, not auto-extracted from composite form)
+other_income: 600
+
+# Dividend adjustment: 3 Chase 1099-DIV forms ($12.18+$27.99+$2331.24)
+# not included in CPA return (likely not provided to CPA)
+dividend_adjustment: -2371
+
+# CA-only miscellaneous itemized deductions (GROSS, before 2% AGI floor)
+# Includes: employee business expenses, investment advisory fees, tax prep fees, etc.
+# TCJA eliminated these federally (2018-2025), but CA did NOT conform.
+# Per CPA Schedule CA Part II; code applies the 2% AGI floor automatically.
+ca_misc_deductions: 77335

@@ -131,6 +131,7 @@ class Form1098:
     mortgage_interest: float = 0.0  # Box 1
     points_paid: float = 0.0  # Box 6
     property_taxes: float = 0.0  # Box 10 (if reported)
+    property_address: str = ""  # Box 8 (address of property securing mortgage)
     is_rental: bool = False  # True if this mortgage is for a rental property
 
 
@@ -262,6 +263,11 @@ class ScheduleAData:
     casualty_losses: float = 0.0  # Federally declared disaster only
     other_deductions: float = 0.0
 
+    # CA-only miscellaneous deductions (TCJA eliminated these federally, CA kept them)
+    # Gross amount before 2% AGI floor; includes employee business expenses,
+    # investment advisory fees, tax prep fees, etc.
+    ca_misc_deductions: float = 0.0
+
     @property
     def total_vehicle_license_fees(self) -> float:
         """Total deductible VLF from all vehicle registrations."""
@@ -282,6 +288,7 @@ class ScheduleAResult:
     use_itemized: bool = False  # True if itemized > standard
     deduction_amount: float = 0.0  # The higher of the two
     ca_itemized_limitation: float = 0.0  # CA high-income itemized deduction reduction
+    ca_misc_deduction: float = 0.0  # CA-only misc deductions after 2% AGI floor
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +506,9 @@ class TaxReturn:
     estimated_payments: List[EstimatedTaxPayment] = field(default_factory=list)
     dependent_care: Optional[DependentCareFSA] = None
 
+    # Config overrides / adjustments
+    federal_withheld_adjustment: float = 0.0  # Added to auto-extracted federal withholding
+
     # Computed schedules
     schedule_e_summary: Optional[ScheduleESummary] = None
     schedule_a_result: Optional[ScheduleAResult] = None
@@ -512,6 +522,7 @@ class TaxReturn:
         total += sum(f.federal_withheld for f in self.form_1099_misc)
         total += sum(f.federal_withheld for f in self.form_1099_nec)
         total += sum(f.federal_withheld for f in self.form_1099_r)
+        total += self.federal_withheld_adjustment
         return total
 
     @property

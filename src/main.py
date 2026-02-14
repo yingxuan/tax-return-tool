@@ -303,10 +303,17 @@ def process_tax_documents(
             elif result.form_type == '1098':
                 form = result.data
                 # Tag rental 1098s based on config keywords
+                # Match against lender name, property address (Box 8),
+                # source file path, and full document text
                 if config and config.rental_1098_keywords:
-                    lender_lower = form.lender_name.lower()
+                    searchable = " ".join([
+                        form.lender_name,
+                        form.property_address,
+                        result.source_file,
+                        result.source_text,
+                    ]).lower()
                     for kw in config.rental_1098_keywords:
-                        if kw in lender_lower:
+                        if kw in searchable:
                             form.is_rental = True
                             break
                 tax_return.form_1098.append(form)
@@ -330,6 +337,33 @@ def process_tax_documents(
             cap = 3_000
         loss = min(config.capital_loss_carryover, cap)
         income.capital_gains -= loss
+
+    # Apply other income from config (e.g. 1099-MISC Box 3 not auto-extracted)
+    if config and config.other_income != 0:
+        income.other_income += config.other_income
+
+    # Apply dividend adjustment from config (e.g. exclude forms not in CPA return)
+    if config and config.dividend_adjustment != 0:
+        income.dividend_income += config.dividend_adjustment
+
+    # Apply estimated tax payments from config (before schedule_a_data creation,
+    # because CA estimated payments count towards state_income_tax_paid for SALT)
+    if config and config.federal_estimated_payments > 0:
+        tax_return.estimated_payments.append(EstimatedTaxPayment(
+            amount=config.federal_estimated_payments,
+            period="Total",
+            jurisdiction="federal",
+        ))
+    if config and config.ca_estimated_payments > 0:
+        tax_return.estimated_payments.append(EstimatedTaxPayment(
+            amount=config.ca_estimated_payments,
+            period="Total",
+            jurisdiction="california",
+        ))
+
+    # Apply federal withholding adjustment from config
+    if config and config.federal_withheld_adjustment != 0:
+        tax_return.federal_withheld_adjustment = config.federal_withheld_adjustment
 
     # Set mortgage balance from config on schedule_a_data
     if config and config.personal_mortgage_balance > 0:
@@ -367,6 +401,14 @@ def process_tax_documents(
             )
         else:
             tax_return.schedule_a_data.mortgage_balance = balance
+
+    # Apply charitable contributions from config
+    if config and config.charitable_contributions > 0 and tax_return.schedule_a_data:
+        tax_return.schedule_a_data.cash_contributions += config.charitable_contributions
+
+    # Apply CA-only miscellaneous deductions from config
+    if config and config.ca_misc_deductions > 0 and tax_return.schedule_a_data:
+        tax_return.schedule_a_data.ca_misc_deductions = config.ca_misc_deductions
 
     # Print data ingestion summary for debugging
     _print_ingestion_summary(tax_return, config)

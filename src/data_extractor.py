@@ -19,6 +19,8 @@ class ExtractionResult:
     data: Optional[object]
     confidence: float
     warnings: List[str]
+    source_file: str = ""
+    source_text: str = ""
 
 
 class TaxDataExtractor:
@@ -189,6 +191,11 @@ class TaxDataExtractor:
             r"Real\s*[Ee]state\s*[Tt]axes?\s*[Pp]aid\s*(?:in\s*\d{4})?\s*\$([\d,]+\.\d{2})",
             r"10\s*(?:Real\s*estate|Property)\s*taxes?[^$]*\$([\d,]+\.\d{2})",
             r"(?:box\s*10|property\s+taxes?)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+        'property_address': [
+            r"8\s*(?:Address|ADDR)\w*\s*(?:or\s*description\s*)?(?:of\s*)?(?:property|prop).*?\n\s*(.+)",
+            r"[Pp]roperty\s+[Aa]ddress[:\s]*\n?\s*(.+)",
+            r"(?:securing\s+(?:the\s+)?mortgage)[:\s]*\n?\s*(.+)",
         ],
     }
 
@@ -664,10 +671,13 @@ class TaxDataExtractor:
         taxes_str, _ = self._extract_value(text, self.FORM_1098_PATTERNS['property_taxes'])
         taxes = self._parse_amount(taxes_str)
 
+        prop_addr, _ = self._extract_value(text, self.FORM_1098_PATTERNS['property_address'])
+
         data = Form1098(
             lender_name=lender_name.strip() if lender_name else "Unknown",
             mortgage_interest=interest,
-            property_taxes=taxes
+            property_taxes=taxes,
+            property_address=prop_addr.strip() if prop_addr else "",
         )
 
         return ExtractionResult(
@@ -1012,6 +1022,8 @@ class TaxDataExtractor:
                 composite_results = self.extract_composite_1099(doc)
                 if composite_results:
                     for r in composite_results:
+                        r.source_file = doc.file_path
+                        r.source_text = doc.text_content
                         results.append(r)
                         safe_path = doc.file_path.encode('ascii', errors='replace').decode('ascii')
                         if r.success:
@@ -1024,6 +1036,8 @@ class TaxDataExtractor:
                 # boilerplate mentioning other form types)
 
             result = self.extract(doc, category_hint=hint)
+            result.source_file = doc.file_path
+            result.source_text = doc.text_content
             results.append(result)
             safe_path = doc.file_path.encode('ascii', errors='replace').decode('ascii')
             if result.success:

@@ -203,12 +203,21 @@ class ScheduleACalculator:
         # Other
         other_deductions = data.casualty_losses + data.other_deductions
 
+        # CA-only miscellaneous deductions (employee expenses, investment fees,
+        # tax prep fees) — TCJA eliminated these federally but CA kept them.
+        # Subject to 2% AGI floor.
+        ca_misc_deduction = 0.0
+        if data.ca_misc_deductions > 0:
+            misc_floor = agi * 0.02
+            ca_misc_deduction = max(0, data.ca_misc_deductions - misc_floor)
+
         total_itemized = (
             medical_deduction +
             salt_deduction +
             mortgage_interest_deduction +
             charitable_deduction +
-            other_deductions
+            other_deductions +
+            ca_misc_deduction
         )
 
         # CA itemized deduction limitation for high-income taxpayers
@@ -239,4 +248,5 @@ class ScheduleACalculator:
             use_itemized=use_itemized,
             deduction_amount=round(deduction_amount, 2),
             ca_itemized_limitation=round(ca_limitation, 2),
+            ca_misc_deduction=round(ca_misc_deduction, 2),
         )
