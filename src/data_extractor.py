@@ -515,36 +515,78 @@ class TaxDataExtractor:
         text_upper = text.upper()
 
         # Check for specific form identifiers
+        # Composite brokerage statements (1099-B) must be detected BEFORE W-2,
+        # because these PDFs contain "W-2" in their instructional boilerplate.
+        # A real W-2 would never contain "PROCEEDS FROM BROKER" or "1099-B".
+        if '1099-B' in text_upper or 'PROCEEDS FROM BROKER' in text_upper:
+            return '1099-B'
         # W-2 patterns (including variations like "W-2", "W2", "WAGE AND TAX")
         if 'W-2' in text_upper or 'W2' in text_upper or 'WAGE AND TAX' in text_upper:
             return 'W-2'
         # 1099-INT patterns
-        elif '1099-INT' in text_upper or ('1099' in text_upper and 'INTEREST INCOME' in text_upper):
+        if '1099-INT' in text_upper or ('1099' in text_upper and 'INTEREST INCOME' in text_upper):
             return '1099-INT'
         # 1099-DIV patterns
-        elif '1099-DIV' in text_upper or ('1099' in text_upper and 'DIVIDENDS' in text_upper):
+        if '1099-DIV' in text_upper or ('1099' in text_upper and 'DIVIDENDS' in text_upper):
             return '1099-DIV'
         # 1099-NEC patterns
-        elif '1099-NEC' in text_upper or 'NONEMPLOYEE COMPENSATION' in text_upper:
+        if '1099-NEC' in text_upper or 'NONEMPLOYEE COMPENSATION' in text_upper:
             return '1099-NEC'
         # 1099-MISC patterns
-        elif '1099-MISC' in text_upper or 'MISCELLANEOUS INCOME' in text_upper:
+        if '1099-MISC' in text_upper or 'MISCELLANEOUS INCOME' in text_upper:
             return '1099-MISC'
-        # 1099-B (brokerage) patterns
-        elif '1099-B' in text_upper or ('1099' in text_upper and 'PROCEEDS FROM BROKER' in text_upper):
-            return '1099-B'
         # 1099-R (retirement) patterns
-        elif '1099-R' in text_upper or ('1099' in text_upper and 'DISTRIBUTIONS FROM PENSIONS' in text_upper):
+        if '1099-R' in text_upper or ('1099' in text_upper and 'DISTRIBUTIONS FROM PENSIONS' in text_upper):
             return '1099-R'
         # 1099-G (government payments) patterns
-        elif '1099-G' in text_upper or ('1099' in text_upper and 'GOVERNMENT PAYMENTS' in text_upper):
+        if '1099-G' in text_upper or ('1099' in text_upper and 'GOVERNMENT PAYMENTS' in text_upper):
             return '1099-G'
         # 1098-T (tuition) patterns - check before generic 1098
-        elif '1098-T' in text_upper or ('1098' in text_upper and 'TUITION' in text_upper):
+        if '1098-T' in text_upper or ('1098' in text_upper and 'TUITION' in text_upper):
             return '1098-T'
         # 1098 (mortgage interest) patterns
-        elif '1098' in text_upper and 'MORTGAGE' in text_upper:
+        if '1098' in text_upper and 'MORTGAGE' in text_upper:
             return '1098'
+
+        # --- Non-IRS document types (content-based) ---
+        # Property Tax
+        if any(kw in text_upper for kw in [
+            'PARCEL NUMBER', 'SECURED TAX', 'PROPERTY TAX',
+            'REAL ESTATE TAX', 'TAX COLLECTOR', 'ASSESSED VALUE',
+            'ANNUAL TAX BILL', 'TAX AND COLLECTIONS',
+        ]):
+            return 'Property Tax'
+        # Vehicle Registration
+        if any(kw in text_upper for kw in [
+            'VEHICLE LICENSE FEE', 'VLF', 'REGISTRATION RENEWAL', 'DMV',
+        ]):
+            return 'Vehicle Registration'
+        # Estimated Payment
+        if any(kw in text_upper for kw in [
+            '1040-ES', '540-ES', 'ESTIMATED TAX PAYMENT', 'PAYMENT VOUCHER',
+            'ESTIMATED 1040ES', 'INDIVIDUAL ESTIMATED TAX',
+        ]):
+            return 'Estimated Payment'
+        # FSA
+        if any(kw in text_upper for kw in [
+            'FLEXIBLE SPENDING', 'DEPENDENT CARE', 'DCFSA', 'FSA',
+        ]):
+            return 'FSA'
+        # Charitable Contribution
+        if any(kw in text_upper for kw in [
+            'TAX-DEDUCTIBLE', 'CHARITABLE CONTRIBUTION', 'DONATION RECEIPT',
+        ]):
+            return 'Charitable Contribution'
+        # Misc Deduction
+        if any(kw in text_upper for kw in [
+            'ADVISORY FEE', 'INVESTMENT MANAGEMENT FEE', 'TAX PREPARATION FEE',
+        ]):
+            return 'Misc Deduction'
+        # Schedule E (property management statements)
+        if any(kw in text_upper for kw in [
+            'PROPERTY MANAGEMENT', 'OWNER STATEMENT',
+        ]):
+            return 'Schedule E'
 
         return None
 
@@ -1678,14 +1720,11 @@ class TaxDataExtractor:
             if csv_result and csv_result.success:
                 return csv_result
 
-        # Category hint from folder structure takes precedence over text-based
-        # detection, since folder placement is an explicit user signal and
-        # text-based matching can misidentify (e.g. a 1099-B containing "W-2"
-        # keywords in its boilerplate).
-        if category_hint:
+        # Content-based detection first; folder hint as fallback for cases
+        # where OCR/text is too poor for content matching.
+        form_type = self.identify_form_type(document.text_content)
+        if not form_type:
             form_type = category_hint
-        else:
-            form_type = self.identify_form_type(document.text_content)
 
         if form_type == 'W-2':
             return self.extract_w2(document)
