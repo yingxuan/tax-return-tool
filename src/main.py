@@ -312,7 +312,9 @@ def process_tax_documents(
             elif result.form_type == '1099-R':
                 form = result.data
                 tax_return.form_1099_r.append(form)
-                income.retirement_income += form.taxable_amount
+                # Code G = direct rollover; do not add to taxable income
+                if (form.distribution_code or "").strip().upper() != "G":
+                    income.retirement_income += form.taxable_amount
             elif result.form_type == 'Misc Deduction':
                 form = result.data
                 if not hasattr(tax_return, '_misc_deductions'):
@@ -451,6 +453,7 @@ def process_tax_documents(
         carryover = config.capital_loss_carryover
         current_gains = income.capital_gains  # Before carryover
         net = current_gains - carryover
+        deductible_loss = 0.0
         if net >= 0:
             # Carryover fully absorbed by gains
             income.capital_gains = net
@@ -461,9 +464,10 @@ def process_tax_documents(
             deductible_loss = min(cap, abs(net))
             income.capital_gains = -deductible_loss
             remaining_carryover = abs(net) - deductible_loss
-        # Store for report
+        # Store for report (starting carryover, amount used this year, remaining)
         tax_return._capital_loss_carryover_applied = carryover
         tax_return._capital_loss_carryover_remaining = round(remaining_carryover, 2)
+        tax_return._capital_loss_deductible_used = round(deductible_loss, 2)
 
     # Other income: auto-extracted from 1099-MISC forms.
     # Config value is used as fallback override if auto-extraction found nothing.

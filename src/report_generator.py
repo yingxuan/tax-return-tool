@@ -103,6 +103,7 @@ def generate_schedule_a_report(result: ScheduleAResult, jurisdiction: str = "Fed
         lines.append(_line(">>> USING ITEMIZED DEDUCTIONS", result.deduction_amount))
     else:
         lines.append(_line(">>> USING STANDARD DEDUCTION", result.deduction_amount))
+    lines.append("    (If this differs from prior year, verify SALT, mortgage interest, and charitable contributions.)")
 
     return "\n".join(lines)
 
@@ -325,9 +326,13 @@ def generate_full_report(tax_return: TaxReturn) -> str:
     lines.append(_line("Wages (W-2)", inc.wages))
     lines.append(_line("Interest Income (1099-INT)", inc.interest_income))
     lines.append(_line("Dividend Income (1099-DIV)", inc.dividend_income))
+    if inc.dividend_income == 0:
+        lines.append("    (If you have 1099-DIV forms, verify they were parsed and amounts extracted.)")
     if inc.qualified_dividends > 0:
         lines.append(_line("  Qualified Dividends", inc.qualified_dividends))
     lines.append(_line("Capital Gains (1099-B/DIV)", inc.capital_gains))
+    if inc.capital_gains <= 0:
+        lines.append("    (If you have broker/1099-B statements with gains, set Document folder to a path that includes them, e.g. .../2025/1099/brokers.)")
     lines.append(_line("Self-Employment (1099-NEC)", inc.self_employment_income))
     lines.append(_line("Retirement (1099-R)", inc.retirement_income))
     lines.append(_line("Net Rental Income (Schedule E)", inc.rental_income))
@@ -412,7 +417,10 @@ def generate_full_report(tax_return: TaxReturn) -> str:
         lines.append("  " + "-" * 68)
         lines.append("  CAPITAL LOSS CARRYOVER (Schedule D)")
         lines.append("  " + "-" * 68)
-        lines.append(_line("  Prior Year Carryover Applied", tr._capital_loss_carryover_applied))
+        lines.append(_line("  Prior Year Carryover (starting)", tr._capital_loss_carryover_applied))
+        used = getattr(tr, '_capital_loss_deductible_used', None)
+        if used is not None and used > 0:
+            lines.append(_line("  Amount Used This Year (max $3,000)", used))
         lines.append(_line("  Remaining Carryover to Next Year", tr._capital_loss_carryover_remaining))
 
     # Refund / Owed per jurisdiction

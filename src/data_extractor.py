@@ -783,8 +783,9 @@ class TaxDataExtractor:
             federal_withheld=fed_withheld
         )
 
+        # Include form even when $0 so count appears; extraction may have missed amounts
         return ExtractionResult(
-            success=ordinary_div > 0,
+            success=True,
             form_type='1099-DIV',
             data=data,
             confidence=conf,
@@ -1573,29 +1574,60 @@ class TaxDataExtractor:
     def _extract_composite_div(self, text: str, payer_name: str) -> Optional[ExtractionResult]:
         """Extract 1099-DIV data from composite statement text."""
         # Patterns match across Fidelity (dotted), Robinhood (dash), ML/Schwab,
-        # and Chase (no-space labels like "Totalordinarydividends").
+        # Chase, and other brokers (including OCR with no spaces).
         # Use finditer + sum to handle multi-account composites.
         ordinary = 0.0
         qualified = 0.0
         cap_gain = 0.0
 
+        # Ordinary dividends: multiple patterns for different broker layouts
         for m in re.finditer(
             r'1a[\s.,-]*Total\s*[Oo]rdinary\s*[Dd]ividends.*?([\d,]+\.\d{2})', text
         ):
             ordinary += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'(?:Total\s*)?[Oo]rdinary\s*[Dd]ividends?\s*[:\s]*([\d,]+\.\d{2})', text
+        ):
+            ordinary += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'Box\s*1a[^0-9]*([\d,]+\.\d{2})', text, re.IGNORECASE
+        ):
+            ordinary += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'1a\s+Total[\s.]*ordinary[\s.]*dividends?[\s.]*([\d,]+\.\d{2})', text, re.IGNORECASE
+        ):
+            ordinary += self._parse_amount(m.group(1))
 
+        # Qualified dividends
         for m in re.finditer(
             r'1b[\s.,-]*[Qq]ualified\s*[Dd]ividends.*?([\d,]+\.\d{2})', text
         ):
             qualified += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'[Qq]ualified\s*[Dd]ividends?\s*[:\s]*([\d,]+\.\d{2})', text
+        ):
+            qualified += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'Box\s*1b[^0-9]*([\d,]+\.\d{2})', text, re.IGNORECASE
+        ):
+            qualified += self._parse_amount(m.group(1))
 
+        # Capital gain distributions
         for m in re.finditer(
             r'2a[\s.,-]*Total\s*[Cc]apital\s*[Gg]ain.*?([\d,]+\.\d{2})', text
         ):
             cap_gain += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'[Tt]otal\s*[Cc]apital\s*[Gg]ain\s*(?:[Dd]istributions?)?\s*[:\s]*([\d,]+\.\d{2})', text
+        ):
+            cap_gain += self._parse_amount(m.group(1))
 
-        if ordinary <= 0:
+        # Return 1099-DIV if we found any dividend amount (ordinary, qualified, or cap gain)
+        if ordinary <= 0 and qualified <= 0 and cap_gain <= 0:
             return None
+        # If we only found qualified/cap_gain (e.g. broker layout), use qualified as ordinary so dividend_income is correct
+        if ordinary <= 0 and qualified > 0:
+            ordinary = qualified
 
         data = Form1099Div(
             payer_name=payer_name,
@@ -1750,6 +1782,27 @@ class TaxDataExtractor:
                 else:
                     lt_gain += val
 
+        # --- Fallback: Short/Long-term realized gain (loss) lines (no Box A/D) ---
+        # Some brokers use "Short-term realized gain (loss)" or "Net gain (loss)" with one amount per line.
+        if st_gain == 0 and lt_gain == 0:
+            for m in re.finditer(
+                r'Short[- ]term\s+(?:transactions\s+)?(?:realized\s+)?(?:net\s+)?(?:gain\s+)?\(?loss\)?\s*(-?[\d,]+\.\d{2})',
+                text, re.IGNORECASE,
+            ):
+                st_gain += self._parse_amount(m.group(1))
+            for m in re.finditer(
+                r'Long[- ]term\s+(?:transactions\s+)?(?:realized\s+)?(?:net\s+)?(?:gain\s+)?\(?loss\)?\s*(-?[\d,]+\.\d{2})',
+                text, re.IGNORECASE,
+            ):
+                lt_gain += self._parse_amount(m.group(1))
+            # Single "Total" or "Net gain (loss)" if still zero (treat as long-term)
+            if st_gain == 0 and lt_gain == 0:
+                for m in re.finditer(
+                    r'(?:Total|Net)\s+(?:realized\s+)?(?:gain\s+)?\(?loss\)?\s*(-?[\d,]+\.\d{2})',
+                    text, re.IGNORECASE,
+                ):
+                    lt_gain += self._parse_amount(m.group(1))
+
         # Build results
         for label, is_short, proceeds, basis, discount, wash, gain in [
             ('Short-term', True, st_proceeds, st_basis, st_discount, st_wash, st_gain),
@@ -1900,10 +1953,15 @@ class TaxDataExtractor:
             hint = (category_hints or {}).get(doc.file_path)
 
             # Composite 1099: extract multiple form types from one document.
-            # Trigger on generic '1099' hint, or any 1099 sub-type hint when the
-            # document text contains multiple form types (composite statement).
+            # Trigger on generic '1099' or '1099-B' hint when document is composite
+            # OR when it contains 1099-B (so standalone broker statements get gains extracted).
             is_1099_hint = hint and (hint == '1099' or hint.startswith('1099-'))
-            if is_1099_hint and self.is_composite_1099(doc.text_content):
+            text_upper = (doc.text_content or "").upper()
+            has_1099_b = "1099-B" in text_upper or "PROCEEDS FROM BROKER" in text_upper
+            try_composite = is_1099_hint and (
+                self.is_composite_1099(doc.text_content) or (hint == "1099-B" and has_1099_b)
+            )
+            if try_composite:
                 composite_results = self.extract_composite_1099(doc)
                 if composite_results:
                     for r in composite_results:
