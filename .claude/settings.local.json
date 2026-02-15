@@ -10,7 +10,9 @@
       "Bash(findstr:*)",
       "Bash(del C:UsersyxuanProjectstax-return-toolcheck_w2.py)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(git push:*)"
     ]
   }
 }

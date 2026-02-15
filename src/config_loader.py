@@ -50,6 +50,7 @@ class TaxProfileConfig:
     other_income: float = 0.0  # Other income (1099-MISC Box 3, jury duty, etc.)
     # Primary residence 2025 property tax total (overrides 1098 + receipts when set)
     primary_property_tax: float = 0.0
+    primary_home_apn: str = ""  # APN of primary home (for multi-parcel property tax receipts)
     rental_properties: List[RentalPropertyConfig] = field(default_factory=list)
 
 

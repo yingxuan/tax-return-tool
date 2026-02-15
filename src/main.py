@@ -230,7 +230,6 @@ def process_tax_documents(
 ) -> TaxReturn:
     """Process tax documents from local files or folder."""
     parser = DocumentParser()
-    extractor = TaxDataExtractor()
 
     # Build taxpayer from config or defaults
     if config:
@@ -239,6 +238,8 @@ def process_tax_documents(
     else:
         taxpayer = TaxpayerInfo(name="Taxpayer", filing_status=FilingStatus.SINGLE)
         tax_year = 2025
+
+    extractor = TaxDataExtractor(tax_year=tax_year)
 
     income = TaxableIncome()
     tax_return = TaxReturn(taxpayer=taxpayer, income=income, tax_year=tax_year)
@@ -356,16 +357,9 @@ def process_tax_documents(
                 # Only include payments for current tax year (or undated)
                 if rec.payment_date is not None and rec.payment_date.year != tax_return.tax_year:
                     continue
-                if rec.is_rental:
-                    # Accumulate; applied to rental property(ies) when built from config
-                    if not hasattr(tax_return, '_extracted_rental_property_tax'):
-                        tax_return._extracted_rental_property_tax = 0.0
-                    tax_return._extracted_rental_property_tax += rec.amount
-                else:
-                    # Primary residence → Schedule A real_estate_taxes
-                    if tax_return.schedule_a_data is None:
-                        tax_return.schedule_a_data = ScheduleAData()
-                    tax_return.schedule_a_data.real_estate_taxes += rec.amount
+                if not hasattr(tax_return, '_property_tax_receipts'):
+                    tax_return._property_tax_receipts = []
+                tax_return._property_tax_receipts.append(rec)
             elif result.form_type == 'FSA':
                 dc = result.data
                 if tax_return.dependent_care is None:
@@ -380,6 +374,59 @@ def process_tax_documents(
                 if tax_return.schedule_a_data is None:
                     tax_return.schedule_a_data = ScheduleAData()
                 tax_return.schedule_a_data.cash_contributions += result.data.amount
+
+    # Resolve property tax receipts: split into primary (Schedule A) vs rental (Schedule E).
+    # Build a unified list of parcels from all receipts.
+    ptax_receipts = getattr(tax_return, '_property_tax_receipts', [])
+    if ptax_receipts:
+        primary_apn = (config.primary_home_apn if config else "").strip()
+        all_parcels = []  # PropertyTaxParcel list
+        for rec in ptax_receipts:
+            if rec.parcels:
+                all_parcels.extend(rec.parcels)
+            elif rec.address or rec.is_rental:
+                # Single-property receipt (payment history format or folder-tagged)
+                from src.data_extractor import PropertyTaxParcel
+                all_parcels.append(PropertyTaxParcel(
+                    apn=getattr(rec, 'parcels', [{}])[0].apn if rec.parcels else "",
+                    address=rec.address,
+                    amount=rec.amount,
+                ))
+            else:
+                # Simple receipt, no parcel info — treat as primary
+                if tax_return.schedule_a_data is None:
+                    tax_return.schedule_a_data = ScheduleAData()
+                tax_return.schedule_a_data.real_estate_taxes += rec.amount
+
+        if len(all_parcels) > 1 and primary_apn:
+            # User selected a primary home — split accordingly
+            if tax_return.schedule_a_data is None:
+                tax_return.schedule_a_data = ScheduleAData()
+            if not hasattr(tax_return, '_extracted_rental_property_tax'):
+                tax_return._extracted_rental_property_tax = 0.0
+            for p in all_parcels:
+                if p.apn == primary_apn or p.address == primary_apn:
+                    tax_return.schedule_a_data.real_estate_taxes += p.amount
+                else:
+                    tax_return._extracted_rental_property_tax += p.amount
+        elif len(all_parcels) > 1:
+            # Multiple properties, no selection — store for UI to ask
+            tax_return._property_tax_parcels = all_parcels
+            # Default: put everything into primary
+            if tax_return.schedule_a_data is None:
+                tax_return.schedule_a_data = ScheduleAData()
+            for p in all_parcels:
+                tax_return.schedule_a_data.real_estate_taxes += p.amount
+        elif len(all_parcels) == 1:
+            p = all_parcels[0]
+            if any(kw in (p.address or "").lower() for kw in ["rental", "rent"]):
+                if not hasattr(tax_return, '_extracted_rental_property_tax'):
+                    tax_return._extracted_rental_property_tax = 0.0
+                tax_return._extracted_rental_property_tax += p.amount
+            else:
+                if tax_return.schedule_a_data is None:
+                    tax_return.schedule_a_data = ScheduleAData()
+                tax_return.schedule_a_data.real_estate_taxes += p.amount
 
     # US Treasury interest: auto-extracted from 1099-INT/DIV Box 3.
     # Config value is used as a fallback override if auto-extraction finds nothing.

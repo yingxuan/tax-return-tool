@@ -34,11 +34,21 @@ class DocumentOnly:
 
 
 @dataclass
+class PropertyTaxParcel:
+    """A single parcel/property from a property tax receipt."""
+    apn: str = ""
+    address: str = ""
+    amount: float = 0.0
+
+
+@dataclass
 class PropertyTaxReceipt:
     """Extracted property tax payment (Schedule A for primary; Schedule E for rental)."""
     amount: float = 0.0
     payment_date: Optional[date_type] = None  # Filter by tax year (e.g. 2025 only)
     is_rental: bool = False  # True => apply to rental property's property_tax (Schedule E)
+    parcels: list = None  # List[PropertyTaxParcel] when multiple parcels detected
+    address: str = ""  # Property address (from payment history format)
 
 
 @dataclass
@@ -354,9 +364,9 @@ class TaxDataExtractor:
         ],
     }
 
-    def __init__(self):
+    def __init__(self, tax_year: int = 0):
         """Initialize the tax data extractor."""
-        pass
+        self.tax_year = tax_year
 
     def _extract_from_csv(self, document: ParsedDocument) -> Optional[ExtractionResult]:
         """
@@ -1124,18 +1134,90 @@ class TaxDataExtractor:
                 pass
         return None
 
-    def extract_property_tax(self, document: ParsedDocument) -> ExtractionResult:
+    def _extract_payment_history_property_tax(self, text: str, tax_year: int) -> Optional[PropertyTaxReceipt]:
+        """Extract from Santa Clara County payment history format.
+
+        Sums payments whose 'Payment Posted' date falls in the given calendar year.
+        Returns None if the format doesn't match.
+        """
+        addr_m = re.search(r'Property Address\s+(.+?)(?:\n|Tax Rate)', text)
+        parcel_m = re.search(r'Parcel Number\s+(\d+)', text)
+        if not addr_m and not parcel_m:
+            return None
+
+        address = addr_m.group(1).strip() if addr_m else ""
+        apn = parcel_m.group(1) if parcel_m else ""
+
+        # Parse payment rows: FY, suffix, installment, tax_amount, add_charges, paid, date
+        rows = re.findall(
+            r'(\d{4})\s+\d+\s+(\d)\s+\$([\d,]+\.\d{2})\s+\$[\d,]+\.\d{2}\s+\$([\d,]+\.\d{2})\s+(\d{2}/\d{2}/\d{4})',
+            text,
+        )
+        total = 0.0
+        for _fy, _inst, _tax_amt, paid_str, date_str in rows:
+            paid = self._parse_amount(paid_str)
+            # Filter by payment date in the target calendar year
+            try:
+                payment_year = int(date_str.split('/')[-1])
+            except (ValueError, IndexError):
+                continue
+            if payment_year == tax_year and paid > 0:
+                total += paid
+
+        if total <= 0:
+            return None
+
+        return PropertyTaxReceipt(
+            amount=round(total, 2),
+            address=address,
+            parcels=[PropertyTaxParcel(apn=apn, address=address, amount=round(total, 2))],
+        )
+
+    def extract_property_tax(self, document: ParsedDocument, tax_year: int = 0) -> ExtractionResult:
         """Extract property tax payment (amount, date, primary vs rental from path)."""
         text = document.text_content
         path_lower = document.file_path.lower()
         warnings = []
-        amount = 0.0
-        for pattern in self.PROPERTY_TAX_PATTERNS:
-            m = re.search(pattern, text, re.IGNORECASE)
-            if m:
-                amount = self._parse_amount(m.group(1))
-                if amount > 0:
-                    break
+
+        # Format 1: Santa Clara County payment history (has Property Address + tabular rows)
+        history = self._extract_payment_history_property_tax(text, tax_year)
+        if history:
+            is_rental = (
+                "rental" in path_lower or "rent_home" in path_lower
+                or "rent_" in path_lower or "rent " in path_lower
+            )
+            history.is_rental = is_rental
+            return ExtractionResult(
+                success=True,
+                form_type='Property Tax',
+                data=history,
+                confidence=0.8,
+                warnings=[],
+            )
+
+        # Format 2: Simple receipt with APN-based parcels
+        parcels = []
+        parcel_matches = re.findall(
+            r'APN:\s*([\d\-]+).*?(?:Installment\s+\d+|Amount)\s+([\d,]+\.\d{2})',
+            text, re.DOTALL | re.IGNORECASE,
+        )
+        for apn, amt_str in parcel_matches:
+            amt = self._parse_amount(amt_str)
+            if amt > 0:
+                parcels.append(PropertyTaxParcel(apn=apn, amount=amt))
+
+        if parcels:
+            amount = sum(p.amount for p in parcels)
+        else:
+            # Format 3: Generic amount patterns
+            amount = 0.0
+            for pattern in self.PROPERTY_TAX_PATTERNS:
+                m = re.search(pattern, text, re.IGNORECASE)
+                if m:
+                    amount = self._parse_amount(m.group(1))
+                    if amount > 0:
+                        break
+
         if amount <= 0:
             warnings.append("Could not extract property tax amount")
         payment_date = self._parse_property_tax_date(text, document.file_path)
@@ -1147,6 +1229,7 @@ class TaxDataExtractor:
             amount=amount,
             payment_date=payment_date,
             is_rental=is_rental,
+            parcels=parcels if len(parcels) > 1 else None,
         )
         return ExtractionResult(
             success=amount > 0,
@@ -1774,7 +1857,7 @@ class TaxDataExtractor:
         elif form_type == 'Vehicle Registration':
             return self.extract_vehicle_registration(document)
         elif form_type == 'Property Tax':
-            return self.extract_property_tax(document)
+            return self.extract_property_tax(document, tax_year=self.tax_year)
         elif form_type == 'FSA':
             return self.extract_fsa(document)
         elif form_type == 'Charitable Contribution':

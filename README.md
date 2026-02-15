@@ -15,6 +15,7 @@ A Python-based tax calculation tool that reads tax documents, extracts data, and
 - **Estimated Tax Payments**: Track quarterly federal and California estimated payments
 - **Dependent Care FSA**: Form 2441 dependent care benefit tracking
 - **Report Generator**: Detailed tax summary report printed to console
+- **Web UI**: Browser-based interface (Flask) for manual input, folder scanning, and file upload with drag-and-drop support
 
 ## Installation
 
@@ -65,6 +66,14 @@ personal_mortgage_balance: 0
 ```
 
 ## Usage
+
+### Web UI
+
+Launch the browser-based interface:
+```bash
+python -m src.ui_app
+```
+Then open http://localhost:5000. The UI supports manual data entry, local folder scanning, and file upload via drag-and-drop.
 
 ### Config-Driven Mode (Recommended)
 
@@ -153,7 +162,8 @@ tax-return-tool/
 │   ├── california_tax.py     # California tax calculation (Form 540)
 │   ├── schedule_e.py         # Schedule E (rental property income)
 │   ├── schedule_a.py         # Schedule A (itemized deductions)
-│   └── report_generator.py   # Tax report output
+│   ├── report_generator.py   # Tax report output
+│   └── ui_app.py             # Flask web UI
 ├── test_tax_calculation.py   # Tax calculation tests
 ├── requirements.txt
 └── README.md
