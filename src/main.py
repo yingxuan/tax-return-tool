@@ -118,6 +118,7 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
     # Step 2: Prepare Schedule A data
     # ---------------------------------------------------------------
     schedule_a_data = tax_return.schedule_a_data
+    personal_mortgage_interest = tax_return.total_personal_mortgage_interest
 
     # If no explicit Schedule A data, auto-populate from source documents.
     # Only use personal (non-rental) mortgage interest for Schedule A;
@@ -135,15 +136,17 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
             f.property_taxes for f in tax_return.form_1098 if not f.is_rental
         )
 
-        mortgage_interest = tax_return.total_personal_mortgage_interest
-
         # Only create Schedule A data if we have meaningful inputs
-        if mortgage_interest > 0 or state_income_tax_paid > 0 or real_estate_taxes > 0:
+        if personal_mortgage_interest > 0 or state_income_tax_paid > 0 or real_estate_taxes > 0:
             schedule_a_data = ScheduleAData(
                 state_income_tax_paid=state_income_tax_paid,
                 real_estate_taxes=real_estate_taxes,
-                mortgage_interest=mortgage_interest,
+                mortgage_interest=personal_mortgage_interest,
             )
+    else:
+        # Schedule A was created from property tax / config; ensure 1098 mortgage interest is in
+        if personal_mortgage_interest > 0 and schedule_a_data.mortgage_interest == 0:
+            schedule_a_data.mortgage_interest = personal_mortgage_interest
 
     # ---------------------------------------------------------------
     # Step 3: Federal Tax (Form 1040)
@@ -338,15 +341,13 @@ def process_tax_documents(
                 # Tag rental 1098s based on config keywords
                 # Match against lender name, property address (Box 8),
                 # source file path, and full document text
+                # Tag as rental when 1098 Box 8 (property address) matches rental_1098_keywords.
+                # If Box 8 is empty (not extracted), fall back to file path so e.g. mortgage-hiawatha.pdf is still tagged rental.
                 if config and config.rental_1098_keywords:
-                    searchable = " ".join([
-                        form.lender_name,
-                        form.property_address,
-                        result.source_file,
-                        result.source_text,
-                    ]).lower()
+                    addr = (form.property_address or "").lower()
+                    path_lower = (result.source_file or "").lower()
                     for kw in config.rental_1098_keywords:
-                        if kw in searchable:
+                        if kw.lower() in addr or (not addr and kw.lower() in path_lower):
                             form.is_rental = True
                             break
                 tax_return.form_1098.append(form)
@@ -608,6 +609,9 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
     print(f"  1098 forms:      {len(tax_return.form_1098)}"
           f" ({sum(1 for f in tax_return.form_1098 if not f.is_rental)} personal,"
           f" {sum(1 for f in tax_return.form_1098 if f.is_rental)} rental)")
+    for i, f1098 in enumerate(tax_return.form_1098, 1):
+        tag = "rental" if f1098.is_rental else "personal"
+        print(f"    1098 #{i}: {f1098.lender_name!r}  interest={fmt(f1098.mortgage_interest)}  [{tag}]")
 
     print(f"\n  Wages:                     {fmt(inc.wages)}")
     print(f"  Interest income:           {fmt(inc.interest_income)}")
@@ -628,6 +632,10 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
     pers_prop_tax_1098 = sum(f.property_taxes for f in tax_return.form_1098 if not f.is_rental)
     print(f"\n  Personal mortgage interest:{fmt(pers_int)}")
     print(f"  Rental mortgage interest:  {fmt(rent_int)}")
+    if tax_return.form_1098 and pers_int == 0 and rent_int > 0:
+        print("  *** NOTE: All 1098s are tagged [rental]. If Linda Vista (primary) has a 1098, add its address/lender to a non-matching name or check rental_1098_keywords.")
+    elif tax_return.form_1098 and pers_int == 0:
+        print("  *** NOTE: Personal mortgage interest is $0. Check 1098 extraction (amount parsed?) and rental_1098_keywords so primary residence 1098 is not tagged rental.")
     print(f"  1098 Box 10 (personal) property taxes: {fmt(pers_prop_tax_1098)}")
     if tax_return.schedule_a_data is not None:
         print(f"  Schedule A real estate taxes (used for SALT): {fmt(tax_return.schedule_a_data.real_estate_taxes)}")
