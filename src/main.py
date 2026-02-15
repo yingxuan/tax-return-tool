@@ -8,8 +8,9 @@ from typing import Optional, List
 from .models import (
     FilingStatus, TaxpayerInfo, TaxableIncome, Deductions, TaxCredits,
     TaxReturn, W2Data, Form1099Int, Form1099Div, Form1099Nec, Form1099R,
-    Form1098, Dependent, RentalProperty, ScheduleAData, CAVehicleRegistration,
-    EstimatedTaxPayment, DependentCareFSA,
+    Form1099B, Form1098, Dependent, RentalProperty, ScheduleAData,
+    CAVehicleRegistration, EstimatedTaxPayment, DependentCareFSA,
+    MiscDeductionDoc,
 )
 from .google_drive import GoogleDriveClient
 from .document_parser import DocumentParser
@@ -100,8 +101,18 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
         # completely at MAGI > $150K.  Estimate MAGI without rental loss.
         if income.rental_income < 0:
             preliminary_agi = income.total_income - income.rental_income
+            disallowed_loss = abs(income.rental_income)
             if preliminary_agi > 150_000:
                 income.rental_income = 0  # Disallow passive rental losses
+                schedule_e_summary.pal_disallowed = disallowed_loss
+                schedule_e_summary.pal_carryover = disallowed_loss
+            elif preliminary_agi > 100_000:
+                # Phase-out: $25K allowance reduced by 50% of (MAGI - $100K)
+                allowance = max(0, 25_000 - (preliminary_agi - 100_000) * 0.5)
+                allowed = min(allowance, disallowed_loss)
+                income.rental_income = -allowed
+                schedule_e_summary.pal_disallowed = disallowed_loss - allowed
+                schedule_e_summary.pal_carryover = disallowed_loss - allowed
 
     # ---------------------------------------------------------------
     # Step 2: Prepare Schedule A data
@@ -292,14 +303,36 @@ def process_tax_documents(
                 income.dividend_income += form.ordinary_dividends
                 income.qualified_dividends += form.qualified_dividends
                 income.capital_gains += form.capital_gain_distributions
+            elif result.form_type == '1099-MISC':
+                form = result.data
+                tax_return.form_1099_misc.append(form)
+                income.other_income += form.other_income
             elif result.form_type == '1099-NEC':
                 form = result.data
                 tax_return.form_1099_nec.append(form)
                 income.self_employment_income += form.nonemployee_compensation
+            elif result.form_type == '1099-B':
+                form = result.data
+                tax_return.form_1099_b.append(form)
+                if form.is_short_term:
+                    income.short_term_capital_gains += form.gain_loss
+                else:
+                    income.long_term_capital_gains += form.gain_loss
+                income.capital_gains += form.gain_loss
             elif result.form_type == '1099-R':
                 form = result.data
                 tax_return.form_1099_r.append(form)
                 income.retirement_income += form.taxable_amount
+            elif result.form_type == 'Misc Deduction':
+                form = result.data
+                if not hasattr(tax_return, '_misc_deductions'):
+                    tax_return._misc_deductions = []
+                tax_return._misc_deductions.append(form)
+            elif result.form_type == 'Schedule E':
+                rental = result.data  # RentalProperty (partial: repairs, mgmt fees)
+                if not hasattr(tax_return, '_extracted_rentals'):
+                    tax_return._extracted_rentals = []
+                tax_return._extracted_rentals.append(rental)
             elif result.form_type == '1098':
                 form = result.data
                 # Tag rental 1098s based on config keywords
@@ -317,53 +350,126 @@ def process_tax_documents(
                             form.is_rental = True
                             break
                 tax_return.form_1098.append(form)
+            elif result.form_type == '1099-G':
+                form = result.data
+                tax_return.form_1099_g.append(form)
+                income.other_income += form.unemployment_compensation
+                if form.state_tax_refund > 0:
+                    income.other_income += form.state_tax_refund
+            elif result.form_type == '1098-T':
+                tax_return.form_1098_t.append(result.data)
+            elif result.form_type == 'Estimated Payment':
+                tax_return.estimated_payments.append(result.data)
+            elif result.form_type == 'Vehicle Registration':
+                if tax_return.schedule_a_data is None:
+                    tax_return.schedule_a_data = ScheduleAData()
+                tax_return.schedule_a_data.vehicle_registrations.append(result.data)
+            elif result.form_type == 'Property Tax':
+                rec = result.data
+                # Only include payments for current tax year (or undated)
+                if rec.payment_date is not None and rec.payment_date.year != tax_return.tax_year:
+                    continue
+                if rec.is_rental:
+                    # Accumulate; applied to rental property(ies) when built from config
+                    if not hasattr(tax_return, '_extracted_rental_property_tax'):
+                        tax_return._extracted_rental_property_tax = 0.0
+                    tax_return._extracted_rental_property_tax += rec.amount
+                else:
+                    # Primary residence → Schedule A real_estate_taxes
+                    if tax_return.schedule_a_data is None:
+                        tax_return.schedule_a_data = ScheduleAData()
+                    tax_return.schedule_a_data.real_estate_taxes += rec.amount
+            elif result.form_type == 'FSA':
+                dc = result.data
+                if tax_return.dependent_care is None:
+                    tax_return.dependent_care = DependentCareFSA(
+                        amount_paid=dc.amount_paid,
+                        fsa_contribution=dc.fsa_contribution,
+                    )
+                else:
+                    tax_return.dependent_care.amount_paid += dc.amount_paid
+                    tax_return.dependent_care.fsa_contribution += dc.fsa_contribution
+            elif result.form_type == 'Charitable Contribution':
+                if tax_return.schedule_a_data is None:
+                    tax_return.schedule_a_data = ScheduleAData()
+                tax_return.schedule_a_data.cash_contributions += result.data.amount
 
-    # Apply US Treasury interest from config (state-exempt)
-    if config and config.us_treasury_interest > 0:
-        # Track as a synthetic 1099-INT with treasury interest only
-        # (the interest is already included in income from actual 1099 forms)
+    # US Treasury interest: auto-extracted from 1099-INT/DIV Box 3.
+    # Config value is used as a fallback override if auto-extraction finds nothing.
+    auto_treasury = sum(f.us_treasury_interest for f in tax_return.form_1099_int) + \
+                    sum(f.us_treasury_interest for f in tax_return.form_1099_div)
+    if auto_treasury > 0:
+        if config and config.us_treasury_interest > 0 and abs(auto_treasury - config.us_treasury_interest) > 1.0:
+            print(f"\n  NOTE: Auto-extracted US Treasury interest ${auto_treasury:,.2f} "
+                  f"differs from config ${config.us_treasury_interest:,.2f}. Using auto-extracted value.")
+    elif config and config.us_treasury_interest > 0:
+        # Fallback: use config value if auto-extraction found nothing
         treasury_marker = Form1099Int(
-            payer_name="US Treasury (config)",
-            interest_income=0.0,  # Already counted in actual 1099-INT
+            payer_name="US Treasury (config override)",
+            interest_income=0.0,
             us_treasury_interest=config.us_treasury_interest,
         )
         tax_return.form_1099_int.append(treasury_marker)
 
-    # Apply capital loss carryover from prior year (capped at $3K for MFJ/Single, $1.5K for MFS)
+    # Apply capital loss carryover from prior year (Schedule D)
+    # First offset current-year gains, then cap any remaining net loss at $3K ($1.5K MFS)
     if config and config.capital_loss_carryover > 0:
-        if taxpayer.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY:
-            cap = 1_500
+        carryover = config.capital_loss_carryover
+        current_gains = income.capital_gains  # Before carryover
+        net = current_gains - carryover
+        if net >= 0:
+            # Carryover fully absorbed by gains
+            income.capital_gains = net
+            remaining_carryover = 0.0
         else:
-            cap = 3_000
-        loss = min(config.capital_loss_carryover, cap)
-        income.capital_gains -= loss
+            # Net loss — cap deductible loss at $3K ($1.5K MFS)
+            cap = 1_500 if taxpayer.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY else 3_000
+            deductible_loss = min(cap, abs(net))
+            income.capital_gains = -deductible_loss
+            remaining_carryover = abs(net) - deductible_loss
+        # Store for report
+        tax_return._capital_loss_carryover_applied = carryover
+        tax_return._capital_loss_carryover_remaining = round(remaining_carryover, 2)
 
-    # Apply other income from config (e.g. 1099-MISC Box 3 not auto-extracted)
-    if config and config.other_income != 0:
+    # Other income: auto-extracted from 1099-MISC forms.
+    # Config value is used as fallback override if auto-extraction found nothing.
+    auto_other = sum(f.other_income for f in tax_return.form_1099_misc)
+    if auto_other > 0:
+        if config and config.other_income != 0 and abs(auto_other - config.other_income) > 1.0:
+            print(f"\n  NOTE: Auto-extracted other income ${auto_other:,.2f} "
+                  f"differs from config ${config.other_income:,.2f}. Using auto-extracted value.")
+    elif config and config.other_income != 0:
         income.other_income += config.other_income
 
-    # Apply dividend adjustment from config (e.g. exclude forms not in CPA return)
-    if config and config.dividend_adjustment != 0:
-        income.dividend_income += config.dividend_adjustment
-
     # Apply estimated tax payments from config (before schedule_a_data creation,
-    # because CA estimated payments count towards state_income_tax_paid for SALT)
+    # because CA estimated payments count towards state_income_tax_paid for SALT).
+    # Config overrides extraction: when set, replace any extracted federal/CA estimated
+    # payments so we don't double-count (config 100k + extracted 100k = 200k).
     if config and config.federal_estimated_payments > 0:
+        tax_return.estimated_payments = [
+            p for p in tax_return.estimated_payments if p.jurisdiction != "federal"
+        ]
         tax_return.estimated_payments.append(EstimatedTaxPayment(
             amount=config.federal_estimated_payments,
             period="Total",
             jurisdiction="federal",
         ))
     if config and config.ca_estimated_payments > 0:
+        tax_return.estimated_payments = [
+            p for p in tax_return.estimated_payments if p.jurisdiction != "california"
+        ]
         tax_return.estimated_payments.append(EstimatedTaxPayment(
             amount=config.ca_estimated_payments,
             period="Total",
             jurisdiction="california",
         ))
 
-    # Apply federal withholding adjustment from config
+    # Apply federal withholding adjustment from config (optional OCR correction override)
     if config and config.federal_withheld_adjustment != 0:
         tax_return.federal_withheld_adjustment = config.federal_withheld_adjustment
+        print(f"\n  WARNING: Using federal_withheld_adjustment = ${config.federal_withheld_adjustment:,.2f} "
+              f"from config. This overrides auto-extracted withholding. "
+              f"Remove this config field once W-2 OCR extraction is verified accurate.")
 
     # Set mortgage balance from config on schedule_a_data
     if config and config.personal_mortgage_balance > 0:
@@ -406,9 +512,74 @@ def process_tax_documents(
     if config and config.charitable_contributions > 0 and tax_return.schedule_a_data:
         tax_return.schedule_a_data.cash_contributions += config.charitable_contributions
 
-    # Apply CA-only miscellaneous deductions from config
-    if config and config.ca_misc_deductions > 0 and tax_return.schedule_a_data:
+    # CA-only miscellaneous deductions: auto-extracted from Misc Deduction docs.
+    # Config value is used as fallback override.
+    auto_misc = sum(d.amount for d in getattr(tax_return, '_misc_deductions', []))
+    if auto_misc > 0 and tax_return.schedule_a_data:
+        tax_return.schedule_a_data.ca_misc_deductions = auto_misc
+        if config and config.ca_misc_deductions > 0 and abs(auto_misc - config.ca_misc_deductions) > 1.0:
+            print(f"\n  NOTE: Auto-extracted CA misc deductions ${auto_misc:,.2f} "
+                  f"differs from config ${config.ca_misc_deductions:,.2f}. Using auto-extracted value.")
+    elif config and config.ca_misc_deductions > 0 and tax_return.schedule_a_data:
         tax_return.schedule_a_data.ca_misc_deductions = config.ca_misc_deductions
+
+    # Build rental properties from config + auto-extracted PM data
+    if config and config.rental_properties:
+        from datetime import datetime as _dt
+        extracted_rentals = getattr(tax_return, '_extracted_rentals', [])
+
+        for rp_cfg in config.rental_properties:
+            purchase_date_val = None
+            if rp_cfg.purchase_date:
+                try:
+                    purchase_date_val = _dt.strptime(rp_cfg.purchase_date, "%Y-%m-%d").date()
+                except ValueError:
+                    pass
+
+            rental = RentalProperty(
+                address=rp_cfg.address,
+                property_type=rp_cfg.property_type,
+                purchase_price=rp_cfg.purchase_price,
+                purchase_date=purchase_date_val,
+                land_value=rp_cfg.land_value,
+                rental_income=rp_cfg.rental_income,
+                insurance=rp_cfg.insurance,
+                property_tax=rp_cfg.property_tax,
+                days_rented=rp_cfg.days_rented,
+                personal_use_days=rp_cfg.personal_use_days,
+            )
+
+            # Merge auto-extracted data (repairs, management fees) from PM statements
+            # Match by address keyword overlap
+            addr_lower = rp_cfg.address.lower()
+            for ext in extracted_rentals:
+                ext_addr = ext.address.lower()
+                # Match if any significant word from the extracted property name
+                # appears in the config address (e.g. "Hiawatha" in both)
+                ext_words = [w for w in ext_addr.split() if len(w) > 3]
+                if any(w in addr_lower for w in ext_words) or not ext_addr:
+                    if ext.repairs > 0:
+                        rental.repairs += ext.repairs
+                    if ext.management_fees > 0:
+                        rental.management_fees += ext.management_fees
+
+            # Add rental 1098 mortgage interest
+            for f1098 in tax_return.form_1098:
+                if f1098.is_rental:
+                    rental.mortgage_interest += f1098.mortgage_interest
+
+            tax_return.rental_properties.append(rental)
+
+        # Apply extracted property tax from receipts (2025 rental only) to first rental
+        extracted_rental_ptax = getattr(tax_return, '_extracted_rental_property_tax', 0.0)
+        if extracted_rental_ptax > 0 and tax_return.rental_properties:
+            tax_return.rental_properties[0].property_tax += extracted_rental_ptax
+
+    # Override Schedule A real estate taxes from config (e.g. correct 2025 primary residence total)
+    if config and config.primary_property_tax > 0:
+        if tax_return.schedule_a_data is None:
+            tax_return.schedule_a_data = ScheduleAData()
+        tax_return.schedule_a_data.real_estate_taxes = config.primary_property_tax
 
     # Print data ingestion summary for debugging
     _print_ingestion_summary(tax_return, config)
@@ -430,7 +601,9 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
     print(f"  W-2 forms:       {len(tax_return.w2_forms)}")
     print(f"  1099-INT forms:  {len(tax_return.form_1099_int)}")
     print(f"  1099-DIV forms:  {len(tax_return.form_1099_div)}")
+    print(f"  1099-MISC forms: {len(tax_return.form_1099_misc)}")
     print(f"  1099-NEC forms:  {len(tax_return.form_1099_nec)}")
+    print(f"  1099-B forms:    {len(tax_return.form_1099_b)}")
     print(f"  1099-R forms:    {len(tax_return.form_1099_r)}")
     print(f"  1098 forms:      {len(tax_return.form_1098)}"
           f" ({sum(1 for f in tax_return.form_1098 if not f.is_rental)} personal,"
@@ -441,15 +614,26 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
     print(f"  Ordinary dividends:        {fmt(inc.dividend_income)}")
     print(f"  Qualified dividends:       {fmt(inc.qualified_dividends)}")
     print(f"  Capital gains:             {fmt(inc.capital_gains)}")
+    if inc.short_term_capital_gains != 0 or inc.long_term_capital_gains != 0:
+        print(f"    Short-term:              {fmt(inc.short_term_capital_gains)}")
+        print(f"    Long-term:               {fmt(inc.long_term_capital_gains)}")
+    print(f"  Other income:              {fmt(inc.other_income)}")
     print(f"  Self-employment:           {fmt(inc.self_employment_income)}")
     print(f"  Retirement:                {fmt(inc.retirement_income)}")
+    print(f"  US Treasury interest:      {fmt(tax_return.total_us_treasury_interest)}")
 
     pers_int = tax_return.total_personal_mortgage_interest
     rent_int = tax_return.total_rental_mortgage_interest
-    pers_prop_tax = sum(f.property_taxes for f in tax_return.form_1098 if not f.is_rental)
+    # "Personal property taxes" in summary = 1098 Box 10 only (personal 1098s). Schedule A uses 1098 + receipts, or config override.
+    pers_prop_tax_1098 = sum(f.property_taxes for f in tax_return.form_1098 if not f.is_rental)
     print(f"\n  Personal mortgage interest:{fmt(pers_int)}")
     print(f"  Rental mortgage interest:  {fmt(rent_int)}")
-    print(f"  Personal property taxes:   {fmt(pers_prop_tax)}")
+    print(f"  1098 Box 10 (personal) property taxes: {fmt(pers_prop_tax_1098)}")
+    if tax_return.schedule_a_data is not None:
+        print(f"  Schedule A real estate taxes (used for SALT): {fmt(tax_return.schedule_a_data.real_estate_taxes)}")
+    extracted_rental_ptax = getattr(tax_return, '_extracted_rental_property_tax', 0.0)
+    if extracted_rental_ptax != 0:
+        print(f"  Extracted rental property tax (2025 receipts): {fmt(extracted_rental_ptax)}")
     print(f"  State withholding (W-2):   {fmt(sum(w.state_withheld for w in tax_return.w2_forms))}")
     print(f"  State withholding (1099-R):{fmt(sum(f.state_withheld for f in tax_return.form_1099_r))}")
 
@@ -461,6 +645,22 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
             ca_pct = min(1_000_000 / bal, 1.0) * 100
             print(f"  Federal proration:         {fed_pct:.2f}%  -> {fmt(pers_int * 750_000 / bal)}")
             print(f"  CA proration:              {ca_pct:.2f}%  -> {fmt(pers_int * min(1_000_000 / bal, 1.0))}")
+
+    # Capital loss carryover
+    if hasattr(tax_return, '_capital_loss_carryover_applied') and tax_return._capital_loss_carryover_applied > 0:
+        print(f"\n  Capital loss carryover:     {fmt(tax_return._capital_loss_carryover_applied)}")
+        print(f"  Remaining carryover:       {fmt(tax_return._capital_loss_carryover_remaining)}")
+
+    # Rental property summary
+    if tax_return.rental_properties:
+        print(f"\n  Rental properties:         {len(tax_return.rental_properties)}")
+        for rp in tax_return.rental_properties:
+            print(f"    {rp.address}:")
+            print(f"      Gross rent:    {fmt(rp.rental_income)}")
+            print(f"      Repairs:       {fmt(rp.repairs)}")
+            print(f"      Mgmt fees:     {fmt(rp.management_fees)}")
+            print(f"      Mortgage int:  {fmt(rp.mortgage_interest)}")
+            print(f"      Depreciation:  {'N/A (missing purchase data)' if rp.purchase_price == 0 else fmt(rp.depreciable_basis / 27.5)}")
 
     if inc.dividend_income == 0 and inc.qualified_dividends == 0:
         print("\n  *** NOTE: No dividend income detected. If you have 1099-DIV")

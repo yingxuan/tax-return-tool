@@ -45,6 +45,20 @@ def generate_schedule_e_report(summary: ScheduleESummary) -> str:
 
     lines.append("\n  " + "-" * 68)
     lines.append(_line("TOTAL Net Rental Income (Loss)", summary.total_net_rental_income))
+
+    # Passive Activity Loss Limitations (Form 8582)
+    if summary.pal_disallowed > 0:
+        lines.append("")
+        lines.append("  Form 8582 - Passive Activity Loss Limitations:")
+        lines.append(_line("  Total Rental Loss (before PAL)", summary.total_net_rental_income))
+        lines.append(_line("  Disallowed Passive Loss", summary.pal_disallowed))
+        allowed = abs(summary.total_net_rental_income) - summary.pal_disallowed
+        if allowed > 0:
+            lines.append(_line("  Allowed Loss (flows to AGI)", -allowed))
+        else:
+            lines.append(_line("  Allowed Loss (flows to AGI)", 0.0))
+        lines.append(_line("  PAL Carryover to Next Year", summary.pal_carryover))
+
     return "\n".join(lines)
 
 
@@ -371,12 +385,58 @@ def generate_full_report(tax_return: TaxReturn) -> str:
     lines.append(_line("Combined Tax Liability", total_tax))
     lines.append(_line("Combined Effective Rate", f"{combined_rate:.2f}%"))
 
+    # Detailed payment breakdown
+    lines.append("")
+    lines.append("  " + "-" * 68)
+    lines.append("  PAYMENTS DETAIL")
+    lines.append("  " + "-" * 68)
+    if fed:
+        lines.append(_line("  Federal Withheld (W-2/1099)", fed.tax_withheld))
+        if fed.estimated_payments > 0:
+            lines.append(_line("  Federal Estimated Payments", fed.estimated_payments))
+        lines.append(_line("  Federal Total Payments", fed.total_payments))
+    if state:
+        lines.append(_line("  CA Withheld (W-2/1099)", state.tax_withheld))
+        if state.estimated_payments > 0:
+            lines.append(_line("  CA Estimated Payments", state.estimated_payments))
+        lines.append(_line("  CA Total Payments", state.total_payments))
+
+    total_payments = (fed.total_payments if fed else 0) + (state.total_payments if state else 0)
+    lines.append("  " + "-" * 68)
+    lines.append(_line("  Total All Payments", total_payments))
+
+    # Capital loss carryover info (if available)
+    tr = tax_return
+    if hasattr(tr, '_capital_loss_carryover_applied') and tr._capital_loss_carryover_applied > 0:
+        lines.append("")
+        lines.append("  " + "-" * 68)
+        lines.append("  CAPITAL LOSS CARRYOVER (Schedule D)")
+        lines.append("  " + "-" * 68)
+        lines.append(_line("  Prior Year Carryover Applied", tr._capital_loss_carryover_applied))
+        lines.append(_line("  Remaining Carryover to Next Year", tr._capital_loss_carryover_remaining))
+
+    # Refund / Owed per jurisdiction
+    lines.append("")
+    lines.append("  " + "-" * 68)
+    lines.append("  REFUND / AMOUNT OWED")
+    lines.append("  " + "-" * 68)
+    if fed:
+        if fed_refund >= 0:
+            lines.append(_line("  Federal Refund", fed_refund))
+        else:
+            lines.append(_line("  Federal Tax Owed", abs(fed_refund)))
+    if state:
+        if state_refund >= 0:
+            lines.append(_line("  CA Refund", state_refund))
+        else:
+            lines.append(_line("  CA Tax Owed", abs(state_refund)))
+
     lines.append("\n  " + "=" * 68)
     total = fed_refund + state_refund
     if total >= 0:
-        lines.append(_line("TOTAL REFUND", total))
+        lines.append(_line("NET TOTAL REFUND", total))
     else:
-        lines.append(_line("TOTAL TAX OWED", abs(total)))
+        lines.append(_line("NET TOTAL TAX OWED", abs(total)))
 
     lines.append("")
     lines.append(_sep("*", 72))

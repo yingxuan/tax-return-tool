@@ -29,7 +29,7 @@ FOLDER_CATEGORY_MAP: Dict[str, str] = {
     '1098': '1098',
     '1099': '1099',
     'bank': '1099-INT',
-    'brokers': '1099-B',
+    'brokers': '1099',
     'ira_retirement': '1099-R',
     '529': '529 Plan',
     'car_registration': 'Vehicle Registration',
@@ -42,6 +42,13 @@ FOLDER_CATEGORY_MAP: Dict[str, str] = {
     'rental': 'Schedule E',
     'donation': 'Charitable Contribution',
     'donations': 'Charitable Contribution',
+    'misc deduction': 'Misc Deduction',
+    'misc deductions': 'Misc Deduction',
+    'advisory fee': 'Misc Deduction',
+    'advisory fees': 'Misc Deduction',
+    'tax prep': 'Misc Deduction',
+    'tax preparation': 'Misc Deduction',
+    'professional fees': 'Misc Deduction',
 }
 
 # Keywords used to auto-categorize files by name (fallback)
@@ -62,12 +69,15 @@ FORM_KEYWORDS: Dict[str, List[str]] = {
     'Property Tax': ['property-tax', 'propertytax', 'real-estate-tax'],
     'Estimated Payment': ['estimated', 'voucher', '1040-es', '540-es'],
     'Charitable Contribution': ['donation', 'charitable'],
+    'Misc Deduction': ['advisory-fee', 'advisoryfee', 'management-fee', 'tax-prep', 'taxprep', 'professional-fee'],
 }
 
 # Categories where we can auto-extract structured data
 EXTRACTABLE_CATEGORIES: Set[str] = {
     'W-2', '1099-INT', '1099-DIV', '1099-NEC', '1099-MISC',
-    '1099-R', '1098',
+    '1099-R', '1099-G', '1098', '1098-T', 'Misc Deduction',
+    'Estimated Payment', 'Vehicle Registration', 'Property Tax',
+    'FSA', 'Charitable Contribution',
 }
 
 

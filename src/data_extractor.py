@@ -1,6 +1,7 @@
 """Extract structured tax data from parsed documents."""
 
 import re
+from datetime import date as date_type
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
@@ -8,6 +9,8 @@ from .document_parser import ParsedDocument
 from .models import (
     W2Data, Form1099Int, Form1099Div, Form1099Misc, Form1099Nec,
     Form1099R, Form1099B, Form1099G, Form1098, Form1098T,
+    MiscDeductionDoc, RentalProperty,
+    CAVehicleRegistration, EstimatedTaxPayment, DependentCareFSA,
 )
 
 
@@ -21,6 +24,27 @@ class ExtractionResult:
     warnings: List[str]
     source_file: str = ""
     source_text: str = ""
+
+
+@dataclass
+class DocumentOnly:
+    """Placeholder for documents we recognized but do not extract structured data from."""
+    category: str = ""
+    description: str = ""
+
+
+@dataclass
+class PropertyTaxReceipt:
+    """Extracted property tax payment (Schedule A for primary; Schedule E for rental)."""
+    amount: float = 0.0
+    payment_date: Optional[date_type] = None  # Filter by tax year (e.g. 2025 only)
+    is_rental: bool = False  # True => apply to rental property's property_tax (Schedule E)
+
+
+@dataclass
+class CharitableContributionDoc:
+    """Extracted charitable contribution amount (for Schedule A)."""
+    amount: float = 0.0
 
 
 class TaxDataExtractor:
@@ -52,9 +76,12 @@ class TaxDataExtractor:
             r"Box\s*1[:\s]*([\d,]+\.?\d*)",
         ],
         'federal_withheld': [
+            # Labeled field pattern (most reliable)
+            r"Federal\s+income\s+tax\s+withheld\s*\$?([\d,]+\.?\d*)",
             # Second number in the pair
             r"[\d,]+\.?\d{2}\s+([\d,]+\.?\d{2})\s*\n.*?3\s*Social",
             r"2\s+Federal.*?\n\s*[\d,]+\.?\d{2}\s+([\d,]+\.?\d{2})",
+            r"2\s+Federal\s+income\s+tax\s+withheld[\s\S]{0,60}\$([\d,]+\.\d{2})",
             r"Box\s*2[:\s]*([\d,]+\.?\d*)",
         ],
         'social_security_wages': [
@@ -99,6 +126,11 @@ class TaxDataExtractor:
             r"(?:box\s*1|interest\s+income)[:\s]*\$?([\d,]+\.?\d*)",
             r"1\s+Interest\s+income[^$]*\$?([\d,]+\.?\d*)",
         ],
+        'us_treasury_interest': [
+            r"(?:box\s*3|interest\s+on\s+U\.?S\.?\s*(?:savings|treasury))[:\s]*\$?([\d,]+\.?\d*)",
+            r"3[\s.,-]+Interest\s*on\s*U\.?S\.?.*?(?:Treas|Treasury).*?([\d,]+\.\d{2})",
+            r"U\.?S\.?\s*(?:Savings|Treasury)\s+(?:Bonds?\s+)?(?:and\s+)?(?:Treasury\s+)?[Oo]bligations.*?\$?([\d,]+\.?\d*)",
+        ],
         'federal_withheld': [
             r"(?:box\s*4|federal\s+income\s+tax\s+withheld)[:\s]*\$?([\d,]+\.?\d*)",
         ],
@@ -120,6 +152,24 @@ class TaxDataExtractor:
         'capital_gain_distributions': [
             r"(?:box\s*2a|total\s+capital\s+gain)[:\s]*\$?([\d,]+\.?\d*)",
             r"2a\s+Total\s+capital\s+gain[^$]*\$?([\d,]+\.?\d*)",
+        ],
+        'federal_withheld': [
+            r"(?:box\s*4|federal\s+income\s+tax\s+withheld)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+    }
+
+    # 1099-MISC patterns
+    FORM_1099_MISC_PATTERNS = {
+        'payer_name': [
+            r"(?:payer'?s?\s+name)[:\s]*([A-Z][A-Za-z\s&.,]+)",
+        ],
+        'rents': [
+            r"(?:box\s*1|rents)[:\s]*\$?([\d,]+\.?\d*)",
+            r"1\s+Rents[^$]*\$?([\d,]+\.?\d*)",
+        ],
+        'other_income': [
+            r"(?:box\s*3|other\s+income)[:\s]*\$?([\d,]+\.?\d*)",
+            r"3\s+Other\s+income[^$]*\$?([\d,]+\.?\d*)",
         ],
         'federal_withheld': [
             r"(?:box\s*4|federal\s+income\s+tax\s+withheld)[:\s]*\$?([\d,]+\.?\d*)",
@@ -196,6 +246,111 @@ class TaxDataExtractor:
             r"8\s*(?:Address|ADDR)\w*\s*(?:or\s*description\s*)?(?:of\s*)?(?:property|prop).*?\n\s*(.+)",
             r"[Pp]roperty\s+[Aa]ddress[:\s]*\n?\s*(.+)",
             r"(?:securing\s+(?:the\s+)?mortgage)[:\s]*\n?\s*(.+)",
+        ],
+    }
+
+    # 1099-G patterns (government payments: unemployment, state refund)
+    FORM_1099_G_PATTERNS = {
+        'payer_name': [
+            r"(?:payer'?s?\s+name|PAYER)[:\s]*([A-Z][A-Za-z\s&.,]+(?:DEPARTMENT|STATE|COUNTY|TREASURY)?)",
+            r"([A-Z][A-Za-z\s]+(?:State|County|Employment)\s+(?:Department|Development))",
+        ],
+        'unemployment_compensation': [
+            r"1\s*Unemployment\s+compensation[\s\S]{0,60}\$?([\d,]+\.?\d*)",
+            r"(?:box\s*1|unemployment\s+compensation)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+        'state_tax_refund': [
+            r"2\s*State\s+or\s+local\s+income\s+tax\s+refunds[\s\S]{0,60}\$?([\d,]+\.?\d*)",
+            r"(?:box\s*2|state\s+.*?tax\s+refund)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+        'federal_withheld': [
+            r"4\s*Federal\s+income\s+tax\s+withheld[\s\S]{0,60}\$?([\d,]+\.?\d*)",
+            r"(?:box\s*4|federal\s+income\s+tax\s+withheld)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+    }
+
+    # 1098-T patterns (tuition)
+    FORM_1098_T_PATTERNS = {
+        'institution_name': [
+            r"(?:recipient'?s?|institution'?s?)\s+name[^A-Z]*([A-Z][A-Za-z\s&.,]+(?:University|College|Institute|School)?)",
+            r"([A-Z][A-Za-z\s&.,]+(?:University|College|Institute))",
+        ],
+        'amounts_billed': [
+            r"1\s*(?:Payments\s+received|Amounts\s+billed)[\s\S]{0,80}\$?([\d,]+\.?\d*)",
+            r"(?:box\s*1|amounts\s+billed|payments\s+received)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+        'scholarships_grants': [
+            r"5\s*Scholarships[\s\S]{0,80}\$?([\d,]+\.?\d*)",
+            r"(?:box\s*5|scholarships\s+and\s+grants)[:\s]*\$?([\d,]+\.?\d*)",
+        ],
+    }
+
+    # Estimated tax payment receipt patterns (1040-ES, 540-ES, Pay1040, etc.)
+    ESTIMATED_PAYMENT_PATTERNS = {
+        'amount': [
+            r"(?:amount\s+paid|payment\s+amount|total\s+paid)[:\s]*\$?([\d,]+\.?\d{2})",
+            r"\$\s*([\d,]+\.\d{2})\s*(?:paid|payment)",
+            r"(?:paid|amount)[:\s]*\$?\s*([\d,]+\.?\d{2})",
+            r"([\d,]+\.\d{2})\s*(?:USD|dollars)",
+        ],
+        'date': [
+            r"(?:date\s+paid|payment\s+date|date)[:\s]*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})",
+            r"(\d{4})[-/](\d{2})[-/](\d{2})",
+        ],
+        'federal_indicator': [
+            r"1040[- ]?ES|Form\s+1040|Pay1040|federal\s+estimated",
+        ],
+        'ca_indicator': [
+            r"540[- ]?ES|Form\s+540|California\s+estimated|state\s+estimated",
+        ],
+    }
+
+    # Vehicle registration (CA: VLF is deductible)
+    # CA DMV uses "Vehicle License Fee", "VLF", "Registration Fee", "Total Due", etc.
+    VEHICLE_REGISTRATION_PATTERNS = {
+        'vehicle_license_fee': [
+            r"(?:vehicle\s+license\s+fee|VLF|license\s+fee)[:\s]*\$?\s*([\d,]+\.?\d*)",
+            r"\$?\s*([\d,]+\.\d{2})\s*(?:vehicle\s+license|VLF|license\s+fee)",
+            r"(?:vehicle\s+license|VLF)[\s\S]{0,40}?\$?\s*([\d,]+\.\d{2})",
+            r"([\d,]+\.\d{2})\s*[\s\S]{0,30}?(?:vehicle\s+license|VLF)",
+        ],
+        'total_registration_fee': [
+            r"(?:total\s+due|amount\s+due|balance\s+due|pay\s+this\s+amount)[:\s]*\$?\s*([\d,]+\.?\d*)",
+            r"(?:registration\s+total|total\s+registration|total\s+fees?|fees?\s+due)[:\s]*\$?\s*([\d,]+\.?\d*)",
+            r"\$\s*([\d,]+\.\d{2})\s*(?:total|due|payable)",
+            r"(?:total|amount)\s*[:\s]*\$?\s*([\d,]+\.\d{2})",
+            r"([\d,]+\.\d{2})\s*(?:USD|dollars?|total)",
+        ],
+    }
+    # Fallback: any dollar amount on doc (used when labeled patterns miss)
+    VEHICLE_REGISTRATION_ANY_AMOUNT = re.compile(r"\$\s*([\d,]+\.\d{2})|([\d,]+\.\d{2})\s*\$?")
+
+    # Property tax receipt (amount + date for tax-year filter)
+    PROPERTY_TAX_PATTERNS = [
+        r"(?:amount\s+paid|total\s+paid|payment\s+amount|total\s+due|amount\s+due)[:\s]*\$?([\d,]+\.?\d{2})",
+        r"\$\s*([\d,]+\.\d{2})",
+        r"([\d,]+\.\d{2})\s*(?:paid|due|USD)",
+    ]
+    PROPERTY_TAX_DATE_PATTERNS = [
+        r"(?:payment\s+date|date\s+paid|transaction\s+date|date)[:\s]*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})",
+        r"(?:paid|date)[:\s]*(\d{4})[-/](\d{2})[-/](\d{2})",
+        r"(\d{4})[-/](\d{2})[-/](\d{2})",
+        r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})",
+    ]
+    # Filename: e.g. Receipt-online-11062025-575.pdf or receipt_20251106.pdf
+    PROPERTY_TAX_FILENAME_DATE = re.compile(
+        r"(?:^|[\-_])(\d{4})(\d{2})(\d{2})(?:\D|$)|"  # YYYYMMDD
+        r"(?:^|[\-_])(\d{2})(\d{2})(\d{4})(?:\D|$)"   # MMDDYYYY
+    )
+
+    # FSA / dependent care receipt
+    FSA_PATTERNS = {
+        'amount_paid': [
+            r"(?:amount\s+paid|total\s+paid|payment)[:\s]*\$?([\d,]+\.?\d*)",
+            r"\$\s*([\d,]+\.?\d*)",
+        ],
+        'fsa_contribution': [
+            r"(?:FSA|contribution|reimbursement)[:\s]*\$?([\d,]+\.?\d*)",
         ],
     }
 
@@ -525,12 +680,16 @@ class TaxDataExtractor:
         interest_str, conf = self._extract_value(text, self.FORM_1099_INT_PATTERNS['interest_income'])
         interest = self._parse_amount(interest_str)
 
+        treasury_str, _ = self._extract_value(text, self.FORM_1099_INT_PATTERNS['us_treasury_interest'])
+        treasury = self._parse_amount(treasury_str)
+
         fed_withheld_str, _ = self._extract_value(text, self.FORM_1099_INT_PATTERNS['federal_withheld'])
         fed_withheld = self._parse_amount(fed_withheld_str)
 
         data = Form1099Int(
             payer_name=payer_name.strip() if payer_name else "Unknown",
             interest_income=interest,
+            us_treasury_interest=treasury,
             federal_withheld=fed_withheld
         )
 
@@ -608,6 +767,40 @@ class TaxDataExtractor:
             data=data,
             confidence=conf,
             warnings=warnings
+        )
+
+    def extract_1099_misc(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract 1099-MISC data from a parsed document."""
+        text = document.text_content
+        warnings = []
+
+        payer_name, _ = self._extract_value(text, self.FORM_1099_MISC_PATTERNS['payer_name'])
+        if not payer_name:
+            payer_name = "Unknown Payer"
+            warnings.append("Could not extract payer name")
+
+        rents_str, _ = self._extract_value(text, self.FORM_1099_MISC_PATTERNS['rents'])
+        rents = self._parse_amount(rents_str)
+
+        other_str, conf = self._extract_value(text, self.FORM_1099_MISC_PATTERNS['other_income'])
+        other = self._parse_amount(other_str)
+
+        fed_withheld_str, _ = self._extract_value(text, self.FORM_1099_MISC_PATTERNS['federal_withheld'])
+        fed_withheld = self._parse_amount(fed_withheld_str)
+
+        data = Form1099Misc(
+            payer_name=payer_name.strip() if payer_name else "Unknown",
+            rents=rents,
+            other_income=other,
+            federal_withheld=fed_withheld,
+        )
+
+        return ExtractionResult(
+            success=rents > 0 or other > 0,
+            form_type='1099-MISC',
+            data=data,
+            confidence=conf,
+            warnings=warnings,
         )
 
     def extract_1099_r(self, document: ParsedDocument) -> ExtractionResult:
@@ -688,6 +881,494 @@ class TaxDataExtractor:
             warnings=warnings
         )
 
+    def extract_1099_g(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract 1099-G data (government payments: unemployment, state refund)."""
+        text = document.text_content
+        warnings = []
+
+        payer_name, _ = self._extract_value(text, self.FORM_1099_G_PATTERNS['payer_name'])
+        if not payer_name:
+            payer_name = "Unknown Payer"
+
+        unemp_str, c1 = self._extract_value(text, self.FORM_1099_G_PATTERNS['unemployment_compensation'])
+        refund_str, c2 = self._extract_value(text, self.FORM_1099_G_PATTERNS['state_tax_refund'])
+        fed_str, c3 = self._extract_value(text, self.FORM_1099_G_PATTERNS['federal_withheld'])
+
+        unemp = self._parse_amount(unemp_str)
+        refund = self._parse_amount(refund_str)
+        fed = self._parse_amount(fed_str)
+
+        data = Form1099G(
+            payer_name=payer_name.strip(),
+            unemployment_compensation=unemp,
+            state_tax_refund=refund,
+            federal_withheld=fed,
+        )
+        success = unemp > 0 or refund > 0
+        conf = max(c1, c2, c3) if success else 0.0
+        if not success:
+            warnings.append("No Box 1 or Box 2 amount found")
+        return ExtractionResult(
+            success=success,
+            form_type='1099-G',
+            data=data,
+            confidence=conf,
+            warnings=warnings,
+        )
+
+    def extract_1098_t(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract 1098-T data (tuition: amounts billed, scholarships)."""
+        text = document.text_content
+        warnings = []
+
+        inst_name, _ = self._extract_value(text, self.FORM_1098_T_PATTERNS['institution_name'])
+        if not inst_name:
+            inst_name = "Unknown Institution"
+            warnings.append("Could not extract institution name")
+
+        billed_str, c1 = self._extract_value(text, self.FORM_1098_T_PATTERNS['amounts_billed'])
+        schol_str, c2 = self._extract_value(text, self.FORM_1098_T_PATTERNS['scholarships_grants'])
+        amounts_billed = self._parse_amount(billed_str)
+        scholarships_grants = self._parse_amount(schol_str)
+
+        data = Form1098T(
+            institution_name=inst_name.strip(),
+            amounts_billed=amounts_billed,
+            scholarships_grants=scholarships_grants,
+        )
+        success = amounts_billed > 0 or scholarships_grants > 0
+        conf = max(c1, c2) if success else 0.0
+        if not success:
+            warnings.append("No Box 1 or Box 5 amount found")
+        return ExtractionResult(
+            success=success,
+            form_type='1098-T',
+            data=data,
+            confidence=conf,
+            warnings=warnings,
+        )
+
+    def extract_estimated_payment(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract estimated tax payment amount and jurisdiction from receipt/confirmation."""
+        text = document.text_content
+        text_upper = text.upper()
+        warnings = []
+
+        amount = 0.0
+        for pattern in self.ESTIMATED_PAYMENT_PATTERNS['amount']:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                amount = self._parse_amount(m.group(1))
+                if amount > 0:
+                    break
+
+        jurisdiction = "federal"
+        if any(re.search(p, text_upper) for p in self.ESTIMATED_PAYMENT_PATTERNS['ca_indicator']):
+            jurisdiction = "california"
+        elif any(re.search(p, text_upper) for p in self.ESTIMATED_PAYMENT_PATTERNS['federal_indicator']):
+            jurisdiction = "federal"
+
+        payment_date = None
+        for pattern in self.ESTIMATED_PAYMENT_PATTERNS['date']:
+            m = re.search(pattern, text)
+            if m:
+                g = m.groups()
+                if len(g) == 3:
+                    try:
+                        a, b, c = int(g[0]), int(g[1]), int(g[2])
+                        if a > 31:  # YYYY-MM-DD
+                            payment_date = date_type(a, b, c)
+                        elif c > 31:  # MM-DD-YYYY or DD-MM-YYYY
+                            payment_date = date_type(c, a, b) if a <= 12 else date_type(c, b, a)
+                        else:
+                            if a <= 12 and b <= 31:
+                                y = c + 2000 if c < 100 else c
+                                payment_date = date_type(y, a, b)
+                        if payment_date:
+                            break
+                    except (ValueError, TypeError):
+                        pass
+
+        if amount <= 0:
+            warnings.append("Could not extract payment amount")
+        data = EstimatedTaxPayment(
+            payment_date=payment_date,
+            amount=amount,
+            period="",
+            jurisdiction=jurisdiction,
+        )
+        return ExtractionResult(
+            success=amount > 0,
+            form_type='Estimated Payment',
+            data=data,
+            confidence=0.7 if amount > 0 else 0.0,
+            warnings=warnings,
+        )
+
+    def extract_vehicle_registration(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract CA vehicle registration / VLF for Schedule A."""
+        text = document.text_content
+        warnings = []
+
+        vlf_str, _ = self._extract_value(text, self.VEHICLE_REGISTRATION_PATTERNS['vehicle_license_fee'])
+        total_str, _ = self._extract_value(text, self.VEHICLE_REGISTRATION_PATTERNS['total_registration_fee'])
+        vlf = self._parse_amount(vlf_str)
+        total = self._parse_amount(total_str)
+        if vlf == 0 and total > 0:
+            vlf = total  # Use total as fallback; user can correct
+        if total == 0 and vlf > 0:
+            total = vlf
+
+        # Fallback: grab any dollar amounts from text (DMV docs vary; OCR may not match labels)
+        if vlf == 0 and total == 0:
+            amounts = []
+            for m in self.VEHICLE_REGISTRATION_ANY_AMOUNT.finditer(text):
+                val = self._parse_amount(m.group(1) or m.group(2))
+                if 20 <= val <= 2000:  # Plausible CA registration/VLF range
+                    amounts.append(val)
+            if amounts:
+                # Use largest amount as total; treat as VLF (user can correct)
+                total = max(amounts)
+                vlf = total
+                warnings.append("Used fallback amount (no VLF/total label found); verify for Schedule A")
+
+        data = CAVehicleRegistration(
+            total_registration_fee=total,
+            vehicle_license_fee=vlf,
+        )
+        success = vlf > 0 or total > 0
+        if not success:
+            warnings.append("Could not extract VLF or total registration amount")
+        return ExtractionResult(
+            success=success,
+            form_type='Vehicle Registration',
+            data=data,
+            confidence=0.5 if (success and warnings) else (0.7 if success else 0.0),
+            warnings=warnings,
+        )
+
+    def _parse_property_tax_date(self, text: str, file_path: str) -> Optional[date_type]:
+        """Extract payment date from receipt text or filename (MMDDYYYY/YYYYMMDD)."""
+        # Try document text first
+        for pattern in self.PROPERTY_TAX_DATE_PATTERNS:
+            m = re.search(pattern, text)
+            if m:
+                g = m.groups()
+                try:
+                    if len(g[0]) == 4 and int(g[0]) > 31:  # YYYY-MM-DD
+                        return date_type(int(g[0]), int(g[1]), int(g[2]))
+                    # M/D/YY or M/D/YYYY (g0=mo, g1=day, g2=year)
+                    y = int(g[2])
+                    if y < 100:
+                        y += 2000
+                    mo, d = int(g[0]), int(g[1])
+                    if 1 <= mo <= 12 and 1 <= d <= 31 and 2000 <= y <= 2100:
+                        return date_type(y, mo, d)
+                except (ValueError, TypeError, IndexError):
+                    pass
+        # Try filename: MMDDYYYY (e.g. 11062025) or YYYYMMDD
+        import os
+        name = os.path.basename(file_path)
+        for m in self.PROPERTY_TAX_FILENAME_DATE.finditer(name):
+            try:
+                g1, g2, g3 = m.group(1), m.group(2), m.group(3)
+                if len(g1) == 4 and int(g1) > 1900:  # YYYYMMDD
+                    return date_type(int(g1), int(g2), int(g3))
+                # MMDDYYYY
+                mo, d, y = int(g1), int(g2), int(g3)
+                if 1 <= mo <= 12 and 1 <= d <= 31 and 2000 <= y <= 2100:
+                    return date_type(y, mo, d)
+            except (ValueError, TypeError, IndexError):
+                pass
+        return None
+
+    def extract_property_tax(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract property tax payment (amount, date, primary vs rental from path)."""
+        text = document.text_content
+        path_lower = document.file_path.lower()
+        warnings = []
+        amount = 0.0
+        for pattern in self.PROPERTY_TAX_PATTERNS:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                amount = self._parse_amount(m.group(1))
+                if amount > 0:
+                    break
+        if amount <= 0:
+            warnings.append("Could not extract property tax amount")
+        payment_date = self._parse_property_tax_date(text, document.file_path)
+        is_rental = (
+            "rental" in path_lower or "rent_home" in path_lower
+            or "rent_" in path_lower or "rent " in path_lower
+        )
+        data = PropertyTaxReceipt(
+            amount=amount,
+            payment_date=payment_date,
+            is_rental=is_rental,
+        )
+        return ExtractionResult(
+            success=amount > 0,
+            form_type='Property Tax',
+            data=data,
+            confidence=0.6 if amount > 0 else 0.0,
+            warnings=warnings,
+        )
+
+    def extract_fsa(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract FSA / dependent care receipt amounts."""
+        text = document.text_content
+        warnings = []
+        amount_paid_str, _ = self._extract_value(text, self.FSA_PATTERNS['amount_paid'])
+        fsa_str, _ = self._extract_value(text, self.FSA_PATTERNS['fsa_contribution'])
+        amount_paid = self._parse_amount(amount_paid_str) if amount_paid_str else 0.0
+        fsa_contribution = self._parse_amount(fsa_str) if fsa_str else 0.0
+        if amount_paid <= 0 and fsa_contribution <= 0:
+            for pattern in self.FSA_PATTERNS['amount_paid']:
+                m = re.search(pattern, text, re.IGNORECASE)
+                if m:
+                    amount_paid = self._parse_amount(m.group(1))
+                    if amount_paid > 0:
+                        break
+        data = DependentCareFSA(
+            amount_paid=amount_paid,
+            fsa_contribution=fsa_contribution,
+        )
+        success = amount_paid > 0 or fsa_contribution > 0
+        if not success:
+            warnings.append("Could not extract FSA/dependent care amount")
+        return ExtractionResult(
+            success=success,
+            form_type='FSA',
+            data=data,
+            confidence=0.6 if success else 0.0,
+            warnings=warnings,
+        )
+
+    CHARITABLE_PATTERNS = [
+        r"(?:donation|contribution|amount\s+donated)[:\s]*\$?([\d,]+\.?\d{2})",
+        r"\$\s*([\d,]+\.\d{2})\s*(?:donation|contribution)",
+        r"(?:total|amount)\s+(?:paid|given)[:\s]*\$?([\d,]+\.?\d*)",
+    ]
+
+    def extract_charitable_contribution(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract charitable contribution amount from receipt."""
+        text = document.text_content
+        warnings = []
+        amount = 0.0
+        for pattern in self.CHARITABLE_PATTERNS:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                amount = self._parse_amount(m.group(1))
+                if amount > 0:
+                    break
+        if amount <= 0:
+            warnings.append("Could not extract charitable contribution amount")
+        data = CharitableContributionDoc(amount=amount)
+        return ExtractionResult(
+            success=amount > 0,
+            form_type='Charitable Contribution',
+            data=data,
+            confidence=0.6 if amount > 0 else 0.0,
+            warnings=warnings,
+        )
+
+    # ------------------------------------------------------------------
+    # Misc Deduction (advisory fees, tax prep, etc.)
+    # ------------------------------------------------------------------
+
+    MISC_DEDUCTION_PATTERNS = [
+        r'(?:advisory|management|investment)\s+fee[s]?.*?\$\s*([\d,]+\.?\d*)',
+        r'(?:tax\s+prep(?:aration)?|professional)\s+fee[s]?.*?\$\s*([\d,]+\.?\d*)',
+        r'(?:total|amount)\s+(?:fees?|charges?|due).*?\$\s*([\d,]+\.?\d*)',
+        r'\$\s*([\d,]+\.\d{2})\s*(?:advisory|management|fee|total)',
+    ]
+
+    MISC_DEDUCTION_TYPE_KEYWORDS = {
+        'advisory_fee': ['advisory', 'management fee', 'investment fee', 'wealth management'],
+        'tax_prep': ['tax prep', 'tax preparation', 'cpa', 'accountant'],
+        'employee_expense': ['employee', 'unreimbursed', 'business expense'],
+    }
+
+    def extract_misc_deduction(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract miscellaneous deduction amounts from fee statements."""
+        text = document.text_content
+        warnings = []
+
+        # Try each pattern to find an amount
+        amount = 0.0
+        for pattern in self.MISC_DEDUCTION_PATTERNS:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                amount = self._parse_amount(match.group(1))
+                if amount > 0:
+                    break
+
+        # Determine deduction type from text keywords
+        text_lower = text.lower()
+        deduction_type = 'other'
+        for dtype, keywords in self.MISC_DEDUCTION_TYPE_KEYWORDS.items():
+            if any(kw in text_lower for kw in keywords):
+                deduction_type = dtype
+                break
+
+        # Use filename as description fallback
+        description = document.file_path.split('/')[-1].split('\\')[-1]
+
+        if amount <= 0:
+            warnings.append(f"Could not extract deduction amount from {document.file_path}")
+
+        data = MiscDeductionDoc(
+            description=description,
+            amount=amount,
+            deduction_type=deduction_type,
+        )
+
+        return ExtractionResult(
+            success=amount > 0,
+            form_type='Misc Deduction',
+            data=data,
+            confidence=0.6 if amount > 0 else 0.0,
+            warnings=warnings,
+        )
+
+    # ------------------------------------------------------------------
+    # Schedule E — Rental Property Management Statements
+    # ------------------------------------------------------------------
+
+    def extract_rental_pm_statement(self, document: ParsedDocument) -> ExtractionResult:
+        """
+        Extract rental property data from a PM statement.
+
+        Supports two document formats:
+        1. Excel/CSV expense ledger: columns Date, Property, Vendor,
+           Description, Debit, Credit, Note.  Debit column = repair costs.
+        2. PDF PM receipt: extracts management fee amount via regex.
+
+        Returns an ExtractionResult with form_type='Schedule E' and
+        data=RentalProperty (partially populated with repairs and/or
+        management_fees).
+        """
+        import pandas as pd
+
+        warnings = []
+        repairs = 0.0
+        management_fees = 0.0
+        property_name = ""
+
+        # ----- Excel / CSV path: parse expense ledger -----
+        if document.raw_data is not None:
+            df = document.raw_data
+
+            # Find the header row containing 'Debit' column
+            header_row = None
+            for idx in range(min(10, len(df))):
+                row_vals = [str(v).strip().lower() for v in df.iloc[idx]]
+                if 'debit' in row_vals:
+                    header_row = idx
+                    break
+
+            if header_row is not None:
+                # Re-read with correct header
+                df.columns = [str(c).strip() for c in df.iloc[header_row]]
+                df = df.iloc[header_row + 1:].reset_index(drop=True)
+
+                # Find Debit column (case-insensitive)
+                debit_col = None
+                for col in df.columns:
+                    if col.lower().strip() == 'debit':
+                        debit_col = col
+                        break
+
+                if debit_col:
+                    # Sum numeric Debit values, excluding total/summary rows
+                    for idx, row in df.iterrows():
+                        val = row[debit_col]
+                        # Check all columns for summary keywords
+                        row_text = ' '.join(str(v) for v in row.values if str(v).lower() not in ('nan', 'none', '')).lower()
+                        # Skip total/summary rows
+                        if 'total' in row_text or 'amount due' in row_text:
+                            continue
+                        try:
+                            amount = float(str(val).replace(',', '').replace('$', ''))
+                            if amount > 0:
+                                repairs += amount
+                        except (ValueError, TypeError):
+                            continue
+
+                # Extract property name from Property column
+                prop_col = None
+                for col in df.columns:
+                    if col.lower().strip() == 'property':
+                        prop_col = col
+                        break
+                if prop_col:
+                    for val in df[prop_col]:
+                        s = str(val).strip()
+                        if s and s.lower() not in ('nan', 'none', ''):
+                            property_name = s
+                            break
+
+                if repairs > 0:
+                    repairs = round(repairs, 2)
+                else:
+                    warnings.append(f"No repair expenses found in Debit column: {document.file_path}")
+            else:
+                warnings.append(f"Could not find header row with 'Debit' column: {document.file_path}")
+
+        # ----- PDF path: extract management fee via regex -----
+        elif document.text_content:
+            text = document.text_content
+            # Match management / consulting fee patterns
+            fee_patterns = [
+                r'(?:management|consulting|pm)\s+(?:fee|consulting)\s*[:.]?\s*[$]?([\d,]+\.\d{2})',
+                r'[$]\s*([\d,]+\.\d{2})\s*(?:management|consulting|pm)\s+(?:fee|consulting)',
+                r'SUBTOTAL\s+[$]([\d,]+\.\d{2})',
+                r'PM\s+consulting\s+\d+\s+[$]([\d,]+\.\d{2})',
+            ]
+            for pattern in fee_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    management_fees = self._parse_amount(match.group(1))
+                    if management_fees > 0:
+                        break
+
+            # Try to extract property address (California address pattern)
+            # Find all CA addresses and prefer the one that's NOT the billing/SOLD TO address
+            addr_matches = re.findall(
+                r'^(\d{2,}\s+[\w\s]+(?:Ct|St|Ave|Dr|Blvd|Ln|Way|Rd|Pl)[.,]?\s*[\w\s]*,?\s*CA\s*\d{5})',
+                text, re.IGNORECASE | re.MULTILINE
+            )
+            # Use last match (rental property, not billing address) if multiple
+            addr_match = addr_matches[-1].strip() if addr_matches else None
+            if addr_match:
+                property_name = addr_match
+
+            if management_fees <= 0:
+                warnings.append(f"Could not extract management fee from PDF: {document.file_path}")
+
+        else:
+            return ExtractionResult(
+                success=False, form_type='Schedule E', data=None,
+                confidence=0.0,
+                warnings=[f"Schedule E document has no parseable data: {document.file_path}"],
+            )
+
+        has_data = repairs > 0 or management_fees > 0
+        rental = RentalProperty(
+            address=property_name,
+            repairs=repairs,
+            management_fees=management_fees,
+        )
+
+        return ExtractionResult(
+            success=has_data,
+            form_type='Schedule E',
+            data=rental,
+            confidence=0.7 if has_data else 0.0,
+            warnings=warnings,
+            source_file=document.file_path,
+        )
+
     # ------------------------------------------------------------------
     # Composite 1099 (consolidated brokerage statements)
     # ------------------------------------------------------------------
@@ -700,7 +1381,7 @@ class TaxDataExtractor:
                 return True
         # Also detect by presence of multiple 1099 form types
         form_count = sum(
-            1 for ft in ['1099-DIV', '1099-INT', '1099-B']
+            1 for ft in ['1099-DIV', '1099-INT', '1099-B', '1099-MISC']
             if ft in text_upper
         )
         return form_count >= 2
@@ -734,11 +1415,16 @@ class TaxDataExtractor:
             if int_result:
                 results.append(int_result)
 
-        # --- 1099-B (informational only — not yet used by main.py) ---
+        # --- 1099-MISC ---
+        if '1099-MISC' in text_upper or 'MISCELLANEOUS' in text_upper:
+            misc_result = self._extract_composite_misc(text, payer_name)
+            if misc_result:
+                results.append(misc_result)
+
+        # --- 1099-B ---
         if '1099-B' in text_upper:
-            b_result = self._extract_composite_b(text, payer_name, document.file_path)
-            if b_result:
-                results.append(b_result)
+            b_results = self._extract_composite_b(text, payer_name, document.file_path)
+            results.extend(b_results)
 
         return results
 
@@ -820,19 +1506,19 @@ class TaxDataExtractor:
         ):
             interest_box3 += self._parse_amount(m.group(1))
 
-        total_interest = interest_box1 + interest_box3
-        if total_interest <= 0:
+        if interest_box1 <= 0 and interest_box3 <= 0:
             return None
 
         warnings = []
         if interest_box3 > 0:
             warnings.append(
-                f"Includes ${interest_box3:,.2f} in U.S. Treasury interest (state-exempt)"
+                f"Includes ${interest_box3:,.2f} in U.S. Treasury interest (Box 3, state-exempt)"
             )
 
         data = Form1099Int(
             payer_name=payer_name,
-            interest_income=total_interest,
+            interest_income=interest_box1,
+            us_treasury_interest=interest_box3,
             federal_withheld=0.0,
         )
         return ExtractionResult(
@@ -843,55 +1529,135 @@ class TaxDataExtractor:
             warnings=warnings,
         )
 
-    def _extract_composite_b(
-        self, text: str, payer_name: str, file_path: str
-    ) -> Optional[ExtractionResult]:
-        """Extract 1099-B summary from composite statement (informational)."""
-        # Look for the summary table with short-term/long-term totals
-        short_gain = 0.0
-        long_gain = 0.0
+    def _extract_composite_misc(self, text: str, payer_name: str) -> Optional[ExtractionResult]:
+        """Extract 1099-MISC data from composite statement text."""
+        other_income = 0.0
 
-        # Fidelity format: "Short-termtransactions...reported...IRS proceeds cost ... gain 0.00"
+        # Box 3: Other income
         for m in re.finditer(
-            r'Short-term.*?reported\s+to\s+the\s+IRS\s+'
-            r'([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+[\d,]+\.\d{2}\s+(-?[\d,]+\.\d{2})',
-            text,
+            r'3[\s.,-]*Other\s*[Ii]ncome.*?([\d,]+\.\d{2})', text
         ):
-            short_gain += self._parse_amount(m.group(3))
+            other_income += self._parse_amount(m.group(1))
 
-        for m in re.finditer(
-            r'Long-term.*?reported\s+to\s+the\s+IRS\s+'
-            r'([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+[\d,]+\.\d{2}\s+(-?[\d,]+\.\d{2})',
-            text,
-        ):
-            long_gain += self._parse_amount(m.group(3))
-
-        # Robinhood format: "Box AShort-Term Realized Gain/Loss"
-        for m in re.finditer(
-            r'Box\s*[AD].*?(?:Short|Long)-Term\s+Realized\s+(?:Gain|Loss)\s+(-?[\d,]+\.\d{2})',
-            text,
-        ):
-            val = self._parse_amount(m.group(1))
-            if 'Short' in m.group(0):
-                short_gain += val
-            else:
-                long_gain += val
-
-        total = short_gain + long_gain
-        if short_gain == 0 and long_gain == 0:
+        if other_income <= 0:
             return None
 
-        return ExtractionResult(
-            success=False,  # Informational — needs manual review for Form 8949
-            form_type='1099-B',
-            data=None,
-            confidence=0.5,
-            warnings=[
-                f"1099-B summary from {file_path}: "
-                f"short-term={short_gain:+,.2f}, long-term={long_gain:+,.2f}, "
-                f"total={total:+,.2f} (requires Form 8949 for full reporting)"
-            ],
+        data = Form1099Misc(
+            payer_name=payer_name,
+            other_income=other_income,
+            federal_withheld=0.0,
         )
+        return ExtractionResult(
+            success=True,
+            form_type='1099-MISC',
+            data=data,
+            confidence=0.8,
+            warnings=[],
+        )
+
+    def _extract_composite_b(
+        self, text: str, payer_name: str, file_path: str
+    ) -> List[ExtractionResult]:
+        """Extract 1099-B summary from composite statement.
+
+        Parses the "Summary of Proceeds From Broker and Barter Exchange
+        Transactions" table found in Fidelity/Schwab/ML composite statements.
+        Returns one ExtractionResult per category (short-term / long-term).
+
+        Summary table row format (Fidelity):
+          Short-term transactions for which basis is reported to the IRS
+            <proceeds> <cost_basis> <market_discount> <wash_sales> <gain_loss> <fed_withheld>
+        """
+        results: List[ExtractionResult] = []
+
+        # --- Fidelity/Schwab summary table rows ---
+        # OCR often strips spaces within labels, producing text like:
+        #   "Short-termtransactionsforwhichbasisisreportedtotheIRS 1,284,956.92 ..."
+        # So we use \s* between words to handle both normal and no-space OCR.
+        _SUMMARY_ROW = (
+            r'({term})-term\s*transactions\s*for\s*which\s*basis\s*is\s*'
+            r'(?:reported|not\s*reported)\s*to\s*the\s*IRS'
+            r'(?:\s*and\s*Term\s*is\s*Unknown)?'
+            r'\s+([\d,]+\.\d{{2}})'   # proceeds
+            r'\s+([\d,]+\.\d{{2}})'   # cost basis
+            r'\s+([\d,]+\.\d{{2}})'   # market discount
+            r'\s+([\d,]+\.\d{{2}})'   # wash sales
+            r'\s+(-?[\d,]+\.\d{{2}})' # gain/loss
+            r'\s+([\d,]+\.\d{{2}})'   # fed withheld
+        )
+
+        # Accumulate short-term and long-term totals across all rows
+        st_proceeds = st_basis = st_wash = st_gain = st_discount = 0.0
+        lt_proceeds = lt_basis = lt_wash = lt_gain = lt_discount = 0.0
+
+        for term, is_short in [('Short', True), ('Long', False)]:
+            pat = _SUMMARY_ROW.format(term=term)
+            for m in re.finditer(pat, text):
+                p = self._parse_amount(m.group(2))
+                b = self._parse_amount(m.group(3))
+                md = self._parse_amount(m.group(4))
+                ws = self._parse_amount(m.group(5))
+                gl = self._parse_amount(m.group(6))
+                if is_short:
+                    st_proceeds += p
+                    st_basis += b
+                    st_discount += md
+                    st_wash += ws
+                    st_gain += gl
+                else:
+                    lt_proceeds += p
+                    lt_basis += b
+                    lt_discount += md
+                    lt_wash += ws
+                    lt_gain += gl
+
+        # --- Fallback: Box A / Box D realized gain/loss lines ---
+        # (Robinhood format and Fidelity per-section TOTALS pages)
+        if st_proceeds == 0 and lt_proceeds == 0:
+            for m in re.finditer(
+                r'Box\s*([AD]).*?(?:Short|Long)-Term\s+Realized\s+'
+                r'(?:Gain|Loss)\s+(-?[\d,]+\.\d{2})',
+                text,
+            ):
+                val = self._parse_amount(m.group(2))
+                if m.group(1) == 'A':
+                    st_gain += val
+                else:
+                    lt_gain += val
+
+        # Build results
+        for label, is_short, proceeds, basis, discount, wash, gain in [
+            ('Short-term', True, st_proceeds, st_basis, st_discount, st_wash, st_gain),
+            ('Long-term', False, lt_proceeds, lt_basis, lt_discount, lt_wash, lt_gain),
+        ]:
+            if proceeds == 0 and basis == 0 and gain == 0:
+                continue
+            data = Form1099B(
+                broker_name=payer_name,
+                description=f"{label} summary",
+                proceeds=proceeds,
+                cost_basis=basis,
+                gain_loss=gain,
+                wash_sale_disallowed=wash,
+                market_discount=discount,
+                is_short_term=is_short,
+                is_summary=True,
+            )
+            warnings = []
+            if wash > 0:
+                warnings.append(
+                    f"{label} wash sale disallowed: ${wash:,.2f} "
+                    f"(already included in cost basis)"
+                )
+            results.append(ExtractionResult(
+                success=True,
+                form_type='1099-B',
+                data=data,
+                confidence=0.8 if proceeds > 0 else 0.5,
+                warnings=warnings,
+            ))
+
+        return results
 
     def extract(self, document: ParsedDocument, category_hint: Optional[str] = None) -> ExtractionResult:
         """
@@ -934,21 +1700,9 @@ class TaxDataExtractor:
         elif form_type == '1098':
             return self.extract_1098(document)
         elif form_type == '1099-G':
-            return ExtractionResult(
-                success=False,
-                form_type='1099-G',
-                data=None,
-                confidence=0.0,
-                warnings=[f"1099-G detected but extraction not yet implemented: {document.file_path}"]
-            )
+            return self.extract_1099_g(document)
         elif form_type == '1098-T':
-            return ExtractionResult(
-                success=False,
-                form_type='1098-T',
-                data=None,
-                confidence=0.0,
-                warnings=[f"1098-T detected but extraction not yet implemented: {document.file_path}"]
-            )
+            return self.extract_1098_t(document)
         elif form_type == '1099-B':
             # 1099-B is complex, return basic info
             return ExtractionResult(
@@ -971,22 +1725,28 @@ class TaxDataExtractor:
                 warnings=[f"1099 form in {document.file_path} — could not determine sub-type from content; requires manual review"]
             )
         elif form_type == '1099-MISC':
+            return self.extract_1099_misc(document)
+        elif form_type == 'Misc Deduction':
+            return self.extract_misc_deduction(document)
+        elif form_type == 'Schedule E':
+            return self.extract_rental_pm_statement(document)
+        elif form_type == 'Estimated Payment':
+            return self.extract_estimated_payment(document)
+        elif form_type == 'Vehicle Registration':
+            return self.extract_vehicle_registration(document)
+        elif form_type == 'Property Tax':
+            return self.extract_property_tax(document)
+        elif form_type == 'FSA':
+            return self.extract_fsa(document)
+        elif form_type == 'Charitable Contribution':
+            return self.extract_charitable_contribution(document)
+        elif form_type in ('Home Insurance', '529 Plan'):
             return ExtractionResult(
-                success=False,
-                form_type='1099-MISC',
-                data=None,
-                confidence=0.0,
-                warnings=[f"1099-MISC detected but extraction not yet implemented: {document.file_path}"]
-            )
-        elif form_type in ('Property Tax', 'Vehicle Registration', 'Schedule E',
-                           'FSA', 'Estimated Payment', 'Charitable Contribution',
-                           'Home Insurance', '529 Plan'):
-            return ExtractionResult(
-                success=False,
+                success=True,
                 form_type=form_type,
-                data=None,
-                confidence=0.0,
-                warnings=[f"Recognized as {form_type} -- requires manual entry in config: {document.file_path}"]
+                data=DocumentOnly(category=form_type, description=form_type),
+                confidence=0.5,
+                warnings=[],
             )
         else:
             return ExtractionResult(
@@ -1017,8 +1777,11 @@ class TaxDataExtractor:
         for doc in documents:
             hint = (category_hints or {}).get(doc.file_path)
 
-            # Composite 1099: extract multiple form types from one document
-            if hint == '1099' and self.is_composite_1099(doc.text_content):
+            # Composite 1099: extract multiple form types from one document.
+            # Trigger on generic '1099' hint, or any 1099 sub-type hint when the
+            # document text contains multiple form types (composite statement).
+            is_1099_hint = hint and (hint == '1099' or hint.startswith('1099-'))
+            if is_1099_hint and self.is_composite_1099(doc.text_content):
                 composite_results = self.extract_composite_1099(doc)
                 if composite_results:
                     for r in composite_results:

@@ -13,6 +13,21 @@ class DependentConfig:
 
 
 @dataclass
+class RentalPropertyConfig:
+    """Rental property config for fields that cannot be auto-extracted."""
+    address: str = ""
+    property_type: str = "Single Family"
+    purchase_price: float = 0.0
+    purchase_date: str = ""  # YYYY-MM-DD
+    land_value: float = 0.0
+    rental_income: float = 0.0  # Gross rent (not in PM statement)
+    insurance: float = 0.0
+    property_tax: float = 0.0
+    days_rented: int = 365
+    personal_use_days: int = 0
+
+
+@dataclass
 class TaxProfileConfig:
     """Taxpayer profile loaded from YAML."""
     tax_year: int = 2025
@@ -33,7 +48,9 @@ class TaxProfileConfig:
     ca_estimated_payments: float = 0.0  # CA estimated tax payments made
     federal_withheld_adjustment: float = 0.0  # Correction to auto-extracted federal withholding
     other_income: float = 0.0  # Other income (1099-MISC Box 3, jury duty, etc.)
-    dividend_adjustment: float = 0.0  # Correction to auto-extracted dividend income
+    # Primary residence 2025 property tax total (overrides 1098 + receipts when set)
+    primary_property_tax: float = 0.0
+    rental_properties: List[RentalPropertyConfig] = field(default_factory=list)
 
 
 def load_config(path: str) -> Optional[TaxProfileConfig]:
@@ -78,6 +95,24 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
                 relationship=d.get("relationship", ""),
             ))
 
+    # Parse rental properties
+    rentals_raw = raw.get("rental_properties", []) or []
+    rental_props = []
+    for rp in rentals_raw:
+        if isinstance(rp, dict):
+            rental_props.append(RentalPropertyConfig(
+                address=rp.get("address", ""),
+                property_type=rp.get("property_type", "Single Family"),
+                purchase_price=float(rp.get("purchase_price", 0.0)),
+                purchase_date=str(rp.get("purchase_date", "")),
+                land_value=float(rp.get("land_value", 0.0)),
+                rental_income=float(rp.get("rental_income", 0.0)),
+                insurance=float(rp.get("insurance", 0.0)),
+                property_tax=float(rp.get("property_tax", 0.0)),
+                days_rented=int(rp.get("days_rented", 365)),
+                personal_use_days=int(rp.get("personal_use_days", 0)),
+            ))
+
     return TaxProfileConfig(
         tax_year=raw.get("tax_year", 2025),
         taxpayer_name=taxpayer.get("name", "Taxpayer"),
@@ -99,5 +134,6 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         ca_estimated_payments=float(raw.get("ca_estimated_payments", 0.0)),
         federal_withheld_adjustment=float(raw.get("federal_withheld_adjustment", 0.0)),
         other_income=float(raw.get("other_income", 0.0)),
-        dividend_adjustment=float(raw.get("dividend_adjustment", 0.0)),
+        primary_property_tax=float(raw.get("primary_property_tax", 0.0)),
+        rental_properties=rental_props,
     )

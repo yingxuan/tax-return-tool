@@ -104,7 +104,11 @@ class Form1099R:
 
 @dataclass
 class Form1099B:
-    """1099-B form data for broker transactions."""
+    """1099-B form data for broker transactions.
+
+    Can represent either a single transaction or a summary-level entry
+    (e.g. "Short-term reported to IRS" row from a composite statement).
+    """
     broker_name: str
     description: str = ""
     date_acquired: Optional[str] = None
@@ -112,7 +116,10 @@ class Form1099B:
     proceeds: float = 0.0
     cost_basis: float = 0.0
     gain_loss: float = 0.0
+    wash_sale_disallowed: float = 0.0
+    market_discount: float = 0.0
     is_short_term: bool = False
+    is_summary: bool = False  # True for summary-level entries (not per-transaction)
 
 
 @dataclass
@@ -141,6 +148,18 @@ class Form1098T:
     institution_name: str
     amounts_billed: float = 0.0  # Box 1
     scholarships_grants: float = 0.0  # Box 5
+
+
+# ---------------------------------------------------------------------------
+# Misc Deduction Documents (CA-only: advisory fees, tax prep, etc.)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MiscDeductionDoc:
+    """A miscellaneous deduction document (CA Schedule CA Part II)."""
+    description: str = ""
+    amount: float = 0.0
+    deduction_type: str = "other"  # advisory_fee, tax_prep, employee_expense, other
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +227,8 @@ class ScheduleEResult:
 class ScheduleESummary:
     """Summary of all Schedule E rental activities."""
     properties: List[ScheduleEResult] = field(default_factory=list)
+    pal_disallowed: float = 0.0  # Passive Activity Loss disallowed (Form 8582)
+    pal_carryover: float = 0.0   # PAL carryover to next year
 
     @property
     def total_rental_income(self) -> float:

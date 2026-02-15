@@ -1,11 +1,17 @@
 """Document parsing for tax forms (PDF, images, CSV/Excel)."""
 
 import os
+import warnings
+import logging
 from pathlib import Path
 from typing import Optional, Union
 from dataclasses import dataclass
 
 import pdfplumber
+
+# Suppress noisy PDF font warnings (missing FontBBox in descriptor)
+for _name in ("pdfminer", "pdfminer.six", "pdfplumber", "pypdf", "PyPDF2"):
+    logging.getLogger(_name).setLevel(logging.ERROR)
 import pytesseract
 from PIL import Image
 import pandas as pd
@@ -86,20 +92,23 @@ class DocumentParser:
         text_content = []
         tables = []
 
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                # Extract text
-                page_text = page.extract_text()
-                if page_text:
-                    text_content.append(page_text)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*[Ff]ont[Bb]ox.*")
+            warnings.filterwarnings("ignore", message=".*font descriptor.*")
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    # Extract text
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_content.append(page_text)
 
-                # Extract tables
-                page_tables = page.extract_tables()
-                for table in page_tables:
-                    if table:
-                        # Convert to DataFrame for easier processing
-                        df = pd.DataFrame(table[1:], columns=table[0] if table else None)
-                        tables.append(df)
+                    # Extract tables
+                    page_tables = page.extract_tables()
+                    for table in page_tables:
+                        if table:
+                            # Convert to DataFrame for easier processing
+                            df = pd.DataFrame(table[1:], columns=table[0] if table else None)
+                            tables.append(df)
 
         combined_text = '\n\n'.join(text_content)
 

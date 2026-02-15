@@ -501,29 +501,43 @@ def test_rental_vs_personal_mortgage():
 
 
 def test_capital_loss_carryover():
-    """Test capital loss carryover reduces capital gains."""
+    """Test capital loss carryover offsets gains then caps net loss at $3K."""
     print("\n" + "=" * 60)
     print("Test: Capital Loss Carryover (Feature 2)")
     print("=" * 60)
 
+    # Case 1: Carryover exceeds current gains → net loss capped at $3K
     income = TaxableIncome(wages=100_000, capital_gains=500)
-
-    # Simulate applying carryover (same logic as main.py)
-    carryover = 3_000
+    carryover = 10_000
     cap = 3_000  # MFJ cap
-    loss = min(carryover, cap)
-    income.capital_gains -= loss
+    net = income.capital_gains - carryover  # 500 - 10000 = -9500
+    deductible = min(cap, abs(net))
+    income.capital_gains = -deductible
+    remaining = abs(net) - deductible  # 9500 - 3000 = 6500
 
     print(f"  Capital gains after carryover: {fmt(income.capital_gains)}")
-    assert income.capital_gains == -2_500, f"Expected -$2,500, got {income.capital_gains}"
+    assert income.capital_gains == -3_000, f"Expected -$3,000, got {income.capital_gains}"
+    assert remaining == 6_500, f"Expected remaining $6,500, got {remaining}"
     print("  [PASS] Capital loss carryover applied correctly")
+    print(f"  Remaining carryover: {fmt(remaining)}")
 
-    # Test MFS cap
-    income2 = TaxableIncome(wages=100_000, capital_gains=0)
+    # Case 2: Carryover partially absorbed by gains
+    income2 = TaxableIncome(wages=100_000, capital_gains=8_000)
+    net2 = income2.capital_gains - carryover  # 8000 - 10000 = -2000
+    deductible2 = min(cap, abs(net2))
+    income2.capital_gains = -deductible2
+    remaining2 = abs(net2) - deductible2  # 2000 - 2000 = 0
+    assert income2.capital_gains == -2_000, f"Expected -$2,000, got {income2.capital_gains}"
+    assert remaining2 == 0, f"Expected remaining $0, got {remaining2}"
+    print("  [PASS] Partial carryover (loss < cap) works correctly")
+
+    # Case 3: MFS cap = $1,500
+    income3 = TaxableIncome(wages=100_000, capital_gains=0)
     mfs_cap = 1_500
-    loss2 = min(carryover, mfs_cap)
-    income2.capital_gains -= loss2
-    assert income2.capital_gains == -1_500, f"Expected -$1,500, got {income2.capital_gains}"
+    net3 = income3.capital_gains - carryover  # -10000
+    deductible3 = min(mfs_cap, abs(net3))
+    income3.capital_gains = -deductible3
+    assert income3.capital_gains == -1_500, f"Expected -$1,500, got {income3.capital_gains}"
     print("  [PASS] MFS $1,500 cap applied correctly")
 
 
