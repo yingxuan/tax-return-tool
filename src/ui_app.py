@@ -404,16 +404,18 @@ INDEX_HTML = """
         <span class="step-title">Tax Documents</span>
       </div>
       <p class="hint" style="margin-bottom:0.3rem">Provide your W-2s, 1099s, 1098s, and other tax forms. Supported formats: PDF, CSV, Excel, and images.</p>
+      <p class="hint" style="margin-bottom:0.5rem; color:#2a5a2a;"><strong>Read files on your device only</strong> — nothing is sent to the internet. Select or drop files/folders so this app can read them locally.</p>
 
-      <label>Select files to parse</label>
+      <label><strong>Read files</strong></label>
       <div class="drop-zone" id="dropZone">
         <div class="drop-zone-icon">&#128194;</div>
-        <p>Drag and drop files or folders here</p>
+        <p>Drag and drop files or folders here to read them, or</p>
         <div class="browse-links">
           <button type="button" class="link-btn" id="selectFilesBtn">Browse files</button>
           <span style="color:#999">or</span>
-          <button type="button" class="link-btn" id="selectFolderBtn">Browse folder</button>
+          <button type="button" class="link-btn" id="selectFolderBtn">Select folder</button>
         </div>
+        <p class="hint" style="margin-top:0.35rem; font-size:0.8rem;">Browser may ask for folder access — that is only to read files on your computer. Data stays on your device.</p>
         <input type="file" id="fileInput" multiple accept=".pdf,.csv,.xlsx,.xls,.jpg,.jpeg,.png,.tiff,.tif,.bmp" style="display:none">
         <input type="file" id="folderInput" webkitdirectory directory style="display:none">
         <div class="file-list" id="fileList"></div>
