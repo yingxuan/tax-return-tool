@@ -15,7 +15,6 @@ A Python-based tax calculation tool that reads tax documents, extracts data, and
 - **Estimated Tax Payments**: Track quarterly federal and California estimated payments
 - **Dependent Care FSA**: Form 2441 dependent care benefit tracking
 - **Report Generator**: Detailed tax summary report printed to console
-- **Google Drive Integration**: Optionally download tax documents from Google Drive
 
 ## Installation
 
@@ -104,13 +103,6 @@ Scan and categorize documents in a directory:
 python -m src.main --watch path/to/tax/docs
 ```
 
-### Process from Google Drive
-
-Process tax documents from a Google Drive folder:
-```bash
-python -m src.main --folder-id YOUR_GOOGLE_DRIVE_FOLDER_ID
-```
-
 ### CLI Overrides
 
 Override config settings from the command line:
@@ -143,29 +135,16 @@ Supported tax years: `2024`, `2025`
 - **1099-R**: Distributions from Pensions, Annuities, Retirement Plans
 - **1098**: Mortgage Interest Statement (auto-tagged as personal or rental via config keywords)
 
-## Google Drive Setup
-
-To use Google Drive integration:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the Google Drive API
-4. Create OAuth 2.0 credentials (Desktop application)
-5. Download the credentials JSON file
-6. Save it as `config/credentials.json`
-
 ## Project Structure
 
 ```
 tax-return-tool/
 ├── config/
-│   ├── credentials.json      # Google API credentials (user-provided)
 │   └── tax_profile.yaml      # Taxpayer profile configuration
 ├── src/
 │   ├── __init__.py
 │   ├── main.py               # Main entry point & CLI
 │   ├── config_loader.py      # YAML config loader
-│   ├── google_drive.py       # Google Drive API integration
 │   ├── document_parser.py    # Document parsing (PDF/images/Excel)
 │   ├── data_extractor.py     # Tax data extraction from documents
 │   ├── file_watcher.py       # Folder scanning & document categorization

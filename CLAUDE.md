@@ -3,6 +3,7 @@
 ## 📋 常用命令
 - **安装依赖**: `pip install -r requirements.txt`
 - **运行 Demo**: `python -m src.main --demo`
+- **启动 Web UI**: `python -m src.ui_app` 或 `flask --app src.ui_app run`，浏览器打开 http://localhost:5000
 - **执行测试**: `python test_tax_calculation.py`
 - **格式化代码**: `ruff check . --fix`
 

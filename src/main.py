@@ -12,7 +12,6 @@ from .models import (
     CAVehicleRegistration, EstimatedTaxPayment, DependentCareFSA,
     MiscDeductionDoc,
 )
-from .google_drive import GoogleDriveClient
 from .document_parser import DocumentParser
 from .data_extractor import TaxDataExtractor
 from .federal_tax import FederalTaxCalculator
@@ -225,13 +224,11 @@ def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
 
 
 def process_tax_documents(
-    folder_id: Optional[str] = None,
-    credentials_path: str = "config/credentials.json",
     local_files: Optional[list] = None,
     local_folder: Optional[str] = None,
     config: Optional[TaxProfileConfig] = None,
 ) -> TaxReturn:
-    """Process tax documents from files or Google Drive."""
+    """Process tax documents from local files or folder."""
     parser = DocumentParser()
     extractor = TaxDataExtractor()
 
@@ -271,17 +268,6 @@ def process_tax_documents(
     elif local_files:
         print("\nProcessing local files...")
         parsed_docs = parser.parse_multiple(local_files)
-    elif folder_id or credentials_path:
-        try:
-            print("\nConnecting to Google Drive...")
-            drive = GoogleDriveClient(credentials_path=credentials_path)
-            downloaded = drive.download_all_tax_documents(folder_id)
-            file_paths = [d['path'] for d in downloaded]
-            parsed_docs = parser.parse_multiple(file_paths)
-        except FileNotFoundError as e:
-            print(f"Error: {e}")
-            print("Skipping Google Drive. Use --files to process local files.")
-            return tax_return
 
     # Extract tax data
     if parsed_docs:
@@ -890,15 +876,6 @@ def main():
         help="Path to YAML config file (default: config/tax_profile.yaml)"
     )
     parser.add_argument(
-        "--folder-id",
-        help="Google Drive folder ID containing tax documents"
-    )
-    parser.add_argument(
-        "--credentials",
-        default="config/credentials.json",
-        help="Path to Google OAuth credentials file"
-    )
-    parser.add_argument(
         "--files", nargs="+",
         help="Local file paths to process (PDF, images, CSV, Excel)"
     )
@@ -954,8 +931,6 @@ def main():
 
     # Process documents
     tax_return = process_tax_documents(
-        folder_id=args.folder_id,
-        credentials_path=args.credentials,
         local_files=args.files,
         local_folder=args.local_folder,
         config=config,
