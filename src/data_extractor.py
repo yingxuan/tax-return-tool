@@ -1606,64 +1606,104 @@ class TaxDataExtractor:
                 return m.group(1).strip()
         return "Composite 1099"
 
+    @staticmethod
+    def _dedup_matches(matches: list) -> float:
+        """Sum match values, deduplicating by position (overlapping patterns)."""
+        # matches: list of (start_pos, value) — keep only distinct positions
+        seen_positions = set()
+        total = 0.0
+        for pos, val in sorted(matches):
+            # Skip if another pattern already matched near this position (within 5 chars)
+            if any(abs(pos - s) < 5 for s in seen_positions):
+                continue
+            seen_positions.add(pos)
+            total += val
+        return total
+
+    def _extract_line_amount(self, text: str, keyword_match) -> Optional[float]:
+        """Extract the first positive dollar amount on the same line after a keyword match.
+
+        Handles dotted fills (Fidelity), parenthetical text with digits (Chase),
+        and plain space-separated amounts. Returns None if no valid amount found.
+        """
+        start = keyword_match.end()
+        end = text.find('\n', start)
+        if end == -1:
+            end = min(start + 200, len(text))
+        remainder = text[start:end]
+        # Find all dollar-amount patterns: $1,234.56 or plain 1,234.56
+        amounts = re.findall(r'\$?([\d,]+\.\d{2})', remainder)
+        for amt_str in amounts:
+            val = self._parse_amount(amt_str)
+            if val > 0:
+                return val
+        return None
+
     def _extract_composite_div(self, text: str, payer_name: str) -> Optional[ExtractionResult]:
         """Extract 1099-DIV data from composite statement text."""
-        # Patterns match across Fidelity (dotted), Robinhood (dash), ML/Schwab,
-        # Chase, and other brokers (including OCR with no spaces).
-        # Use finditer + sum to handle multi-account composites.
-        ordinary = 0.0
-        qualified = 0.0
-        cap_gain = 0.0
+        # Two-step extraction: find keyword patterns, then extract the amount
+        # from the same line. This avoids regex issues with dotted fills
+        # (Fidelity: 80+ dots) and parenthetical text containing digits
+        # (Chase: "includesBoxes1b,5,6").
+        ord_matches = []
+        qual_matches = []
+        cap_matches = []
 
-        # Ordinary dividends: multiple patterns for different broker layouts
-        for m in re.finditer(
-            r'1a[\s.,-]*Total\s*[Oo]rdinary\s*[Dd]ividends.*?([\d,]+\.\d{2})', text
-        ):
-            ordinary += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'(?:Total\s*)?[Oo]rdinary\s*[Dd]ividends?\s*[:\s]*([\d,]+\.\d{2})', text
-        ):
-            ordinary += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'Box\s*1a[^0-9]*([\d,]+\.\d{2})', text, re.IGNORECASE
-        ):
-            ordinary += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'1a\s+Total[\s.]*ordinary[\s.]*dividends?[\s.]*([\d,]+\.\d{2})', text, re.IGNORECASE
-        ):
-            ordinary += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'[Oo]rdinary\s*[Dd]ividends?[\s:\-]*\$?\s*([\d,]+\.\d{2})', text
-        ):
-            ordinary += self._parse_amount(m.group(1))
+        # --- Ordinary dividends ---
+        # Keyword patterns must require a Box/line prefix (1a) or "Total" keyword
+        # to avoid matching transaction detail lines (e.g. "QUALIFIEDDIVIDEND $511.95").
+        # Skip recap lines like "QualifiedDividends (Box1bincludedinBox1a)".
+        skip_patterns = (r'included\s*in\s*Box', r'Detail', r'LINE\s*1[AB]', r'Form\s*1099-DIV', r'1099-DIV')
 
-        # Qualified dividends
-        for m in re.finditer(
-            r'1b[\s.,-]*[Qq]ualified\s*[Dd]ividends.*?([\d,]+\.\d{2})', text
-        ):
-            qualified += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'[Qq]ualified\s*[Dd]ividends?\s*[:\s]*([\d,]+\.\d{2})', text
-        ):
-            qualified += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'Box\s*1b[^0-9]*([\d,]+\.\d{2})', text, re.IGNORECASE
-        ):
-            qualified += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'[Qq]ualified\s*[Dd]ividends?[\s:\-]*\$?\s*([\d,]+\.\d{2})', text
-        ):
-            qualified += self._parse_amount(m.group(1))
+        ordinary_kw = [
+            # "1a. Totalordinarydividends(includesBoxes1b,5,6) $2,331.24" (Chase)
+            # "1a Total Ordinary Dividends.......2,458.60" (Fidelity)
+            r'1a[\s.,-]*(?:Total\s*)?[Oo]rdinary\s*[Dd]ividends',
+            # "Total Ordinary Dividends.......2,458.60" (Fidelity alternate)
+            r'Total\s*[Oo]rdinary\s*[Dd]ividends?',
+            # "OrdinaryDividends(Box1a) $27.99" (Chase summary section)
+            r'[Oo]rdinary\s*[Dd]ividends\s*\(?Box\s*1a\)?',
+        ]
+        for kw in ordinary_kw:
+            for m in re.finditer(kw, text, re.IGNORECASE):
+                context = text[max(0, m.start() - 40):m.end() + 60]
+                if any(re.search(sp, context, re.IGNORECASE) for sp in skip_patterns):
+                    continue
+                val = self._extract_line_amount(text, m)
+                if val:
+                    ord_matches.append((m.start(), val))
 
-        # Capital gain distributions
-        for m in re.finditer(
-            r'2a[\s.,-]*Total\s*[Cc]apital\s*[Gg]ain.*?([\d,]+\.\d{2})', text
-        ):
-            cap_gain += self._parse_amount(m.group(1))
-        for m in re.finditer(
-            r'[Tt]otal\s*[Cc]apital\s*[Gg]ain\s*(?:[Dd]istributions?)?\s*[:\s]*([\d,]+\.\d{2})', text
-        ):
-            cap_gain += self._parse_amount(m.group(1))
+        ordinary = self._dedup_matches(ord_matches)
+
+        # --- Qualified dividends ---
+        qualified_kw = [
+            r'1b[\s.,-]*[Qq]ualified\s*[Dd]ividends',
+            r'Total\s*[Qq]ualified\s*[Dd]ividends?',
+            r'[Qq]ualified\s*[Dd]ividends\s*\(?Box\s*1b',
+        ]
+        for kw in qualified_kw:
+            for m in re.finditer(kw, text, re.IGNORECASE):
+                context = text[max(0, m.start() - 40):m.end() + 60]
+                if any(re.search(sp, context, re.IGNORECASE) for sp in skip_patterns):
+                    continue
+                val = self._extract_line_amount(text, m)
+                if val:
+                    qual_matches.append((m.start(), val))
+
+        qualified = self._dedup_matches(qual_matches)
+
+        # --- Capital gain distributions ---
+        capgain_kw = [
+            r'2a[\s.,-]*Total\s*[Cc]apital\s*[Gg]ain',
+            r'[Tt]otal\s*[Cc]apital\s*[Gg]ain\s*(?:[Dd]istributions?)?',
+        ]
+        for kw in capgain_kw:
+            for m in re.finditer(kw, text, re.IGNORECASE):
+                val = self._extract_line_amount(text, m)
+                if val:
+                    cap_matches.append((m.start(), val))
+
+        cap_gain = self._dedup_matches(cap_matches)
 
         # If we only found qualified/cap_gain (e.g. broker layout), use qualified as ordinary so dividend_income is correct
         if ordinary <= 0 and qualified > 0:
