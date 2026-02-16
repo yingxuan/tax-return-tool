@@ -15,7 +15,7 @@ from .models import (
 from .document_parser import DocumentParser
 from .data_extractor import TaxDataExtractor
 from .federal_tax import FederalTaxCalculator
-from .california_tax import CaliforniaTaxCalculator
+from .state_tax import calculate_state_tax
 from .schedule_e import ScheduleECalculator
 from .schedule_a import ScheduleACalculator
 from .report_generator import generate_full_report
@@ -176,27 +176,33 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
     )
 
     # ---------------------------------------------------------------
-    # Step 4: California Tax (Form 540)
+    # Step 4: State Tax (CA Form 540, NY IT-201, etc.; no-tax states return None)
     # ---------------------------------------------------------------
-    ca_calculator = CaliforniaTaxCalculator(
+    state_of_residence = getattr(taxpayer, "state_of_residence", "CA") or "CA"
+    tax_return.state_of_residence = state_of_residence
+    federal_agi = tax_return.federal_calculation.adjusted_gross_income
+    state_credits = TaxCredits()
+
+    state_estimated = sum(
+        p.amount for p in tax_return.estimated_payments
+        if (p.jurisdiction == "california" and state_of_residence == "CA")
+        or (p.jurisdiction in ("new_york", "ny") and state_of_residence == "NY")
+        or (p.jurisdiction in ("new_jersey", "nj") and state_of_residence == "NJ")
+        or (p.jurisdiction in ("pennsylvania", "pa") and state_of_residence == "PA")
+    )
+    tax_return.state_calculation = calculate_state_tax(
+        state_code=state_of_residence,
         filing_status=taxpayer.filing_status,
         tax_year=tax_year,
-    )
-    ca_credits = TaxCredits()  # CA-specific credits are separate
-
-    # Pass federal AGI for CA exemption credit phaseout
-    federal_agi = tax_return.federal_calculation.adjusted_gross_income
-
-    tax_return.state_calculation = ca_calculator.calculate(
         income=income,
         deductions=deductions,
-        credits=ca_credits,
+        credits=state_credits,
         state_withheld=tax_return.total_state_withheld,
         num_exemptions=taxpayer.num_exemptions,
         is_renter=taxpayer.is_renter,
         schedule_a_data=schedule_a_data,
         schedule_e_summary=schedule_e_summary,
-        estimated_payments=tax_return.total_state_estimated_payments,
+        estimated_payments=state_estimated,
         us_treasury_interest=tax_return.total_us_treasury_interest,
         federal_agi=federal_agi,
     )
@@ -217,6 +223,7 @@ def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
         name=config.taxpayer_name,
         filing_status=filing_status,
         age=config.age,
+        state_of_residence=getattr(config, "state_of_residence", "CA"),
         is_ca_resident=config.is_ca_resident,
         is_renter=config.is_renter,
         dependents=deps,
@@ -468,6 +475,12 @@ def process_tax_documents(
         tax_return._capital_loss_carryover_applied = carryover
         tax_return._capital_loss_carryover_remaining = round(remaining_carryover, 2)
         tax_return._capital_loss_deductible_used = round(deductible_loss, 2)
+
+    # Dividend overrides: if config has values, replace extracted (for when extraction undercounts)
+    if config and config.qualified_dividends > 0:
+        income.qualified_dividends = config.qualified_dividends
+    if config and config.ordinary_dividends > 0:
+        income.dividend_income = config.ordinary_dividends
 
     # Other income: auto-extracted from 1099-MISC forms.
     # Config value is used as fallback override if auto-extraction found nothing.
@@ -728,6 +741,7 @@ def run_demo():
         name="John & Jane Doe",
         filing_status=FilingStatus.MARRIED_FILING_JOINTLY,
         age=42,
+        state_of_residence="CA",
         is_ca_resident=True,
         is_renter=False,  # They own a home
         dependents=[

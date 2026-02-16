@@ -477,7 +477,8 @@ class FederalTaxCalculator:
         # --- Tax (Line 16) ---
         # Use preferential QD/LTCG rates when applicable
         qualified_dividends = income.qualified_dividends
-        net_ltcg = income.long_term_capital_gains + income.capital_gains  # capital_gains includes cap gain distributions
+        # LTCG + 1099-DIV cap gain distributions (capital_gains = ST + LT + distributions)
+        net_ltcg = income.capital_gains - income.short_term_capital_gains
         # Only use preferential calculation when there are QD or positive LTCG
         if qualified_dividends > 0 or net_ltcg > 0:
             income_tax, ordinary_tax, qdcg_tax, bracket_breakdown = (

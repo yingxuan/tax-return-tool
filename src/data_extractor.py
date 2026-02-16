@@ -253,6 +253,8 @@ class TaxDataExtractor:
             r"(?:box\s*10|property\s+taxes?)[:\s]*\$?([\d,]+\.?\d*)",
         ],
         'property_address': [
+            # Prefer a line that looks like a US address (number, street, City, ST, ZIP)
+            r"(\d{1,6}\s+[^\n,]+,\s*[A-Za-z\s\.]+,\s*[A-Z]{2}\s*,?\s*\d{5}(?:-\d{4})?)",
             r"8\s*(?:Address|ADDR)\w*\s*(?:or\s*description\s*)?(?:of\s*)?(?:property|prop).*?\n\s*(.+)",
             r"[Pp]roperty\s+[Aa]ddress[:\s]*\n?\s*(.+)",
             r"(?:securing\s+(?:the\s+)?mortgage)[:\s]*\n?\s*(.+)",
@@ -619,6 +621,25 @@ class TaxDataExtractor:
                 return match.group(1), max(confidence, 0.5)
         return None, 0.0
 
+    def _clean_1098_property_address(self, text: str, prop_addr: Optional[str]) -> Optional[str]:
+        """If Box 8 extraction captured form placeholder text, search for a real US address line."""
+        addr = (prop_addr or "").strip()
+        placeholder_keywords = (
+            "street address", "city or town", "state or province", "zip or",
+            "address and telephone", "country, zip", "for this mortgage",
+        )
+        if addr and not any(kw in addr.lower() for kw in placeholder_keywords):
+            return addr
+        # Search for a line that looks like: 1015 Hiawatha Ct, Sunnyvale, CA, 94087
+        us_addr_pattern = re.compile(
+            r"(\d{1,6}\s+[^\n,]+,\s*[A-Za-z\s\.]+,\s*[A-Z]{2}\s*,?\s*\d{5}(?:-\d{4})?)",
+            re.IGNORECASE,
+        )
+        match = us_addr_pattern.search(text)
+        if match:
+            return match.group(1).strip()
+        return prop_addr.strip() if prop_addr else None
+
     def _parse_amount(self, value: Optional[str]) -> float:
         """
         Parse a monetary amount string to float.
@@ -918,12 +939,13 @@ class TaxDataExtractor:
         taxes = self._parse_amount(taxes_str)
 
         prop_addr, _ = self._extract_value(text, self.FORM_1098_PATTERNS['property_address'])
+        prop_addr = self._clean_1098_property_address(text, prop_addr)
 
         data = Form1098(
             lender_name=lender_name.strip() if lender_name else "Unknown",
             mortgage_interest=interest,
             property_taxes=taxes,
-            property_address=prop_addr.strip() if prop_addr else "",
+            property_address=(prop_addr or "").strip(),
         )
 
         return ExtractionResult(
@@ -1597,6 +1619,10 @@ class TaxDataExtractor:
             r'1a\s+Total[\s.]*ordinary[\s.]*dividends?[\s.]*([\d,]+\.\d{2})', text, re.IGNORECASE
         ):
             ordinary += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'[Oo]rdinary\s*[Dd]ividends?[\s:\-]*\$?\s*([\d,]+\.\d{2})', text
+        ):
+            ordinary += self._parse_amount(m.group(1))
 
         # Qualified dividends
         for m in re.finditer(
@@ -1611,6 +1637,10 @@ class TaxDataExtractor:
             r'Box\s*1b[^0-9]*([\d,]+\.\d{2})', text, re.IGNORECASE
         ):
             qualified += self._parse_amount(m.group(1))
+        for m in re.finditer(
+            r'[Qq]ualified\s*[Dd]ividends?[\s:\-]*\$?\s*([\d,]+\.\d{2})', text
+        ):
+            qualified += self._parse_amount(m.group(1))
 
         # Capital gain distributions
         for m in re.finditer(
@@ -1622,12 +1652,26 @@ class TaxDataExtractor:
         ):
             cap_gain += self._parse_amount(m.group(1))
 
-        # Return 1099-DIV if we found any dividend amount (ordinary, qualified, or cap gain)
-        if ordinary <= 0 and qualified <= 0 and cap_gain <= 0:
-            return None
         # If we only found qualified/cap_gain (e.g. broker layout), use qualified as ordinary so dividend_income is correct
         if ordinary <= 0 and qualified > 0:
             ordinary = qualified
+
+        # Return 1099-DIV even when all amounts are 0 so the form is "detected" and report can prompt user to verify
+        if ordinary <= 0 and qualified <= 0 and cap_gain <= 0:
+            data = Form1099Div(
+                payer_name=payer_name,
+                ordinary_dividends=0.0,
+                qualified_dividends=0.0,
+                capital_gain_distributions=0.0,
+                federal_withheld=0.0,
+            )
+            return ExtractionResult(
+                success=True,
+                form_type='1099-DIV',
+                data=data,
+                confidence=0.3,
+                warnings=["1099-DIV section found but no amounts could be extracted; check PDF layout or enter manually."],
+            )
 
         data = Form1099Div(
             payer_name=payer_name,
@@ -1953,13 +1997,14 @@ class TaxDataExtractor:
             hint = (category_hints or {}).get(doc.file_path)
 
             # Composite 1099: extract multiple form types from one document.
-            # Trigger on generic '1099' or '1099-B' hint when document is composite
-            # OR when it contains 1099-B (so standalone broker statements get gains extracted).
+            # Try composite when: (1) doc looks like composite (multiple 1099 types), or
+            # (2) we have a 1099 hint and doc is composite or has 1099-B.
             is_1099_hint = hint and (hint == '1099' or hint.startswith('1099-'))
             text_upper = (doc.text_content or "").upper()
             has_1099_b = "1099-B" in text_upper or "PROCEEDS FROM BROKER" in text_upper
-            try_composite = is_1099_hint and (
-                self.is_composite_1099(doc.text_content) or (hint == "1099-B" and has_1099_b)
+            is_composite = self.is_composite_1099(doc.text_content)
+            try_composite = is_composite or (
+                is_1099_hint and (is_composite or (hint == "1099-B" and has_1099_b))
             )
             if try_composite:
                 composite_results = self.extract_composite_1099(doc)

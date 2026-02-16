@@ -1,7 +1,66 @@
 """Load taxpayer profile from a YAML configuration file."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
+
+# All US states + DC for state-of-residence selection.
+# (code, display_name); states with no general income tax marked for UI.
+US_STATES: List[Tuple[str, str]] = [
+    ("AL", "Alabama"),
+    ("AK", "Alaska"),
+    ("AZ", "Arizona"),
+    ("AR", "Arkansas"),
+    ("CA", "California"),
+    ("CO", "Colorado"),
+    ("CT", "Connecticut"),
+    ("DE", "Delaware"),
+    ("DC", "District of Columbia"),
+    ("FL", "Florida"),
+    ("GA", "Georgia"),
+    ("HI", "Hawaii"),
+    ("ID", "Idaho"),
+    ("IL", "Illinois"),
+    ("IN", "Indiana"),
+    ("IA", "Iowa"),
+    ("KS", "Kansas"),
+    ("KY", "Kentucky"),
+    ("LA", "Louisiana"),
+    ("ME", "Maine"),
+    ("MD", "Maryland"),
+    ("MA", "Massachusetts"),
+    ("MI", "Michigan"),
+    ("MN", "Minnesota"),
+    ("MS", "Mississippi"),
+    ("MO", "Missouri"),
+    ("MT", "Montana"),
+    ("NE", "Nebraska"),
+    ("NV", "Nevada"),
+    ("NH", "New Hampshire"),
+    ("NJ", "New Jersey"),
+    ("NM", "New Mexico"),
+    ("NY", "New York"),
+    ("NC", "North Carolina"),
+    ("ND", "North Dakota"),
+    ("OH", "Ohio"),
+    ("OK", "Oklahoma"),
+    ("OR", "Oregon"),
+    ("PA", "Pennsylvania"),
+    ("RI", "Rhode Island"),
+    ("SC", "South Carolina"),
+    ("SD", "South Dakota"),
+    ("TN", "Tennessee"),
+    ("TX", "Texas"),
+    ("UT", "Utah"),
+    ("VT", "Vermont"),
+    ("VA", "Virginia"),
+    ("WA", "Washington"),
+    ("WV", "West Virginia"),
+    ("WI", "Wisconsin"),
+    ("WY", "Wyoming"),
+]
+
+# States with no general state income tax (wages); this tool does not calculate state tax for them.
+STATES_NO_INCOME_TAX = {"AK", "FL", "NV", "NH", "SD", "TN", "TX", "WA", "WY"}
 
 
 @dataclass
@@ -34,7 +93,8 @@ class TaxProfileConfig:
     taxpayer_name: str = "Taxpayer"
     filing_status: str = "single"
     age: int = 30
-    is_ca_resident: bool = True
+    state_of_residence: str = "CA"  # Two-letter state code; CA = California (only state with calculated tax)
+    is_ca_resident: bool = True  # Derived from state_of_residence == "CA"
     is_renter: bool = False
     dependents: List[DependentConfig] = field(default_factory=list)
     document_folder: Optional[str] = None
@@ -48,6 +108,8 @@ class TaxProfileConfig:
     ca_estimated_payments: float = 0.0  # CA estimated tax payments made
     federal_withheld_adjustment: float = 0.0  # Correction to auto-extracted federal withholding
     other_income: float = 0.0  # Other income (1099-MISC Box 3, jury duty, etc.)
+    qualified_dividends: float = 0.0  # Override: 1099-DIV Box 1b total (if extraction is wrong)
+    ordinary_dividends: float = 0.0  # Override: 1099-DIV Box 1a total (if extraction is wrong)
     # Primary residence 2025 property tax total (overrides 1098 + receipts when set)
     primary_property_tax: float = 0.0
     primary_home_apn: str = ""  # APN of primary home (for multi-parcel property tax receipts)
@@ -114,12 +176,18 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
                 personal_use_days=int(rp.get("personal_use_days", 0)),
             ))
 
+    state_of_residence = (raw.get("state_of_residence") or taxpayer.get("state_of_residence") or "CA").strip().upper()
+    if len(state_of_residence) != 2:
+        state_of_residence = "CA"
+    is_ca_resident = state_of_residence == "CA"
+
     return TaxProfileConfig(
         tax_year=raw.get("tax_year", 2025),
         taxpayer_name=taxpayer.get("name", "Taxpayer"),
         filing_status=taxpayer.get("filing_status", "single"),
         age=taxpayer.get("age", 30),
-        is_ca_resident=taxpayer.get("is_ca_resident", True),
+        state_of_residence=state_of_residence,
+        is_ca_resident=is_ca_resident,
         is_renter=taxpayer.get("is_renter", False),
         dependents=deps,
         document_folder=raw.get("document_folder"),
@@ -135,6 +203,8 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         ca_estimated_payments=float(raw.get("ca_estimated_payments", 0.0)),
         federal_withheld_adjustment=float(raw.get("federal_withheld_adjustment", 0.0)),
         other_income=float(raw.get("other_income", 0.0)),
+        qualified_dividends=float(raw.get("qualified_dividends", 0.0)),
+        ordinary_dividends=float(raw.get("ordinary_dividends", 0.0)),
         primary_property_tax=float(raw.get("primary_property_tax", 0.0)),
         rental_properties=rental_props,
     )

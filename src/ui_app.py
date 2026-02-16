@@ -6,6 +6,7 @@ changing core logic.
 """
 
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 from flask import Flask, request, render_template_string, jsonify
 
 # Import existing pipeline; no changes to these modules
-from .config_loader import load_config, TaxProfileConfig
+from .config_loader import load_config, TaxProfileConfig, US_STATES
 from .main import process_tax_documents, process_tax_return
 from .report_generator import generate_full_report
 
@@ -44,6 +45,9 @@ def config_from_form(form) -> TaxProfileConfig:
     """Build TaxProfileConfig from form data; defaults match config_loader."""
     document_folder = (form.get("document_folder") or "").strip() or None
     filing_status = (form.get("filing_status") or "single").strip().lower()
+    state_of_residence = (form.get("state_of_residence") or "CA").strip().upper()
+    if len(state_of_residence) != 2:
+        state_of_residence = "CA"
     keywords_str = (form.get("rental_1098_keywords") or "").strip()
     rental_1098_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
 
@@ -52,7 +56,8 @@ def config_from_form(form) -> TaxProfileConfig:
         taxpayer_name=(form.get("taxpayer_name") or "Taxpayer").strip(),
         filing_status=filing_status,
         age=_int(form, "age", 30),
-        is_ca_resident=form.get("is_ca_resident") in ("true", "1", "on", "yes"),
+        state_of_residence=state_of_residence,
+        is_ca_resident=(state_of_residence == "CA"),
         is_renter=form.get("is_renter") in ("true", "1", "on", "yes"),
         dependents=[],
         document_folder=document_folder,
@@ -66,6 +71,8 @@ def config_from_form(form) -> TaxProfileConfig:
         ca_estimated_payments=_float(form, "ca_estimated_payments"),
         federal_withheld_adjustment=_float(form, "federal_withheld_adjustment"),
         other_income=_float(form, "other_income"),
+        qualified_dividends=_float(form, "qualified_dividends"),
+        ordinary_dividends=_float(form, "ordinary_dividends"),
         primary_property_tax=_float(form, "primary_property_tax"),
         primary_home_apn=(form.get("primary_home_apn") or "").strip(),
         rental_properties=[],
@@ -80,7 +87,10 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     if fs:
         config.filing_status = fs.strip().lower()
     config.age = _int(form, "age", config.age)
-    config.is_ca_resident = form.get("is_ca_resident") in ("true", "1", "on", "yes")
+    so = (form.get("state_of_residence") or "").strip().upper()
+    if len(so) == 2:
+        config.state_of_residence = so
+    config.is_ca_resident = config.state_of_residence == "CA"
     config.is_renter = form.get("is_renter") in ("true", "1", "on", "yes")
     doc_folder = (form.get("document_folder") or "").strip()
     if doc_folder:
@@ -97,6 +107,8 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     config.ca_estimated_payments = _float(form, "ca_estimated_payments", config.ca_estimated_payments)
     config.federal_withheld_adjustment = _float(form, "federal_withheld_adjustment", config.federal_withheld_adjustment)
     config.other_income = _float(form, "other_income", config.other_income)
+    config.qualified_dividends = _float(form, "qualified_dividends", config.qualified_dividends)
+    config.ordinary_dividends = _float(form, "ordinary_dividends", config.ordinary_dividends)
     config.primary_property_tax = _float(form, "primary_property_tax", config.primary_property_tax)
     apn = (form.get("primary_home_apn") or "").strip()
     if apn:
@@ -107,7 +119,31 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
 @app.route("/")
 def index():
     """Serve the single-page UI."""
-    return render_template_string(INDEX_HTML)
+    state_options = "\n".join(
+        f'<option value="{code}"{" selected" if code == "CA" else ""}>{name}</option>'
+        for code, name in US_STATES
+    )
+    return render_template_string(INDEX_HTML, state_options=state_options)
+
+
+def _clean_1098_display_address(property_address: str, lender_name: str) -> str:
+    """Use 1098 Box 8 address for display; strip form placeholder text and prefer real address."""
+    addr = (property_address or "").strip()
+    if not addr:
+        return lender_name or "Unknown"
+    # Common PDF form labels that get captured instead of the actual address
+    placeholder_patterns = (
+        "street address", "city or town", "state or province", "zip or",
+        "address and telephone", "country, zip", "for this mortgage",
+    )
+    lower = addr.lower()
+    if any(p in lower for p in placeholder_patterns):
+        # Try to extract real address from parentheses, e.g. "address and telephone number (10886 LINDA VISTA DR)"
+        m = re.search(r"\(([^)]{5,})\)", addr)
+        if m:
+            return m.group(1).strip()
+        return lender_name or "Unknown"
+    return addr
 
 
 def _detect_missing(tax_return) -> dict:
@@ -155,6 +191,7 @@ def _detect_missing(tax_return) -> dict:
                 "lender": f.lender_name,
                 "interest": f.mortgage_interest,
                 "address": f.property_address or "",
+                "display_label": _clean_1098_display_address(f.property_address or "", f.lender_name),
             }
             for f in tax_return.form_1098
         ]
@@ -360,7 +397,7 @@ INDEX_HTML = """
   </div>
 
   <h1>Tax Return Tool</h1>
-  <p class="subtitle">Calculate Federal (1040) and California (540) taxes from your documents.</p>
+  <p class="subtitle">Calculate Federal (1040) and state taxes. State tax is calculated for California (Form 540) and New York (IT-201); other states show residency and W-2 withholding.</p>
 
   <form id="form">
     <!-- Step 1: Profile -->
@@ -387,13 +424,20 @@ INDEX_HTML = """
           </select>
         </div>
       </div>
-      <div style="max-width:100px">
-        <label>Age</label>
-        <input type="number" name="age" value="30" min="1" max="120">
+      <div class="field-row">
+        <div style="max-width:100px">
+          <label>Age</label>
+          <input type="number" name="age" value="30" min="1" max="120">
+        </div>
+        <div>
+          <label>State of residence</label>
+          <select name="state_of_residence">
+            {{ state_options | safe }}
+          </select>
+        </div>
       </div>
       <div class="checkbox-row">
-        <label><input type="checkbox" name="is_ca_resident" checked> California resident</label>
-        <label><input type="checkbox" name="is_renter"> Renter</label>
+        <label><input type="checkbox" name="is_renter"> Renter (for CA Renter's Credit)</label>
       </div>
     </div>
 
@@ -416,6 +460,7 @@ INDEX_HTML = """
           <button type="button" class="link-btn" id="selectFolderBtn">Select folder</button>
         </div>
         <p class="hint" style="margin-top:0.35rem; font-size:0.8rem;">Browser may ask for folder access — that is only to read files on your computer. Data stays on your device.</p>
+        <p class="hint" style="margin-top:0.25rem; font-size:0.8rem; color:#2a5a2a;"><strong>If the browser shows &quot;Upload&quot;</strong> — that is the browser&apos;s wording only. You are <strong>not</strong> uploading to the internet; this app reads the files locally.</p>
         <input type="file" id="fileInput" multiple accept=".pdf,.csv,.xlsx,.xls,.jpg,.jpeg,.png,.tiff,.tif,.bmp" style="display:none">
         <input type="file" id="folderInput" webkitdirectory directory style="display:none">
         <div class="file-list" id="fileList"></div>
@@ -465,7 +510,7 @@ INDEX_HTML = """
       </div>
       <div class="field-wrap" data-field="rental_1098_keywords">
         <label>Which 1098 is for a rental property?</label>
-        <p class="hint">Multiple 1098 forms were detected. Select the one for your rental.</p>
+        <p class="hint">Addresses below are from 1098 Box 8. Select the one that is your rental.</p>
         <div id="lenderOptions"></div>
         <input type="hidden" name="rental_1098_keywords" id="rental1098Hidden" value="">
       </div>
@@ -484,6 +529,10 @@ INDEX_HTML = """
           <div class="field-group-title">Income Adjustments</div>
           <label>Other income <span class="label-hint">- 1099-MISC Box 3, jury duty, etc.</span></label>
           <input type="number" name="other_income" step="0.01" value="0">
+          <label>Qualified dividends override <span class="label-hint">- 1099-DIV Box 1b total (if extraction is low)</span></label>
+          <input type="number" name="qualified_dividends" step="0.01" value="0">
+          <label>Ordinary dividends override <span class="label-hint">- 1099-DIV Box 1a total (if extraction is low)</span></label>
+          <input type="number" name="ordinary_dividends" step="0.01" value="0">
           <label>US Treasury interest <span class="label-hint">- exempt from CA state tax</span></label>
           <input type="number" name="us_treasury_interest" step="0.01" value="0">
           <label>Federal withholding adjustment <span class="label-hint">- correction to auto-extracted amount</span></label>
@@ -675,9 +724,9 @@ INDEX_HTML = """
         const detail = document.createElement('span');
         detail.className = 'lender-detail';
         const amt = Number(opt.interest).toLocaleString('en-US', {style:'currency', currency:'USD'});
-        detail.innerHTML = '<span class="lender-name">' + opt.lender + '</span>'
-          + (opt.address ? ' <span class="lender-amt">(' + opt.address + ')</span>' : '')
-          + ' <span class="lender-amt">- ' + amt + ' interest</span>';
+        var primary = opt.display_label || opt.lender;
+        detail.innerHTML = '<span class="lender-name">' + primary + '</span>'
+          + ' <span class="lender-amt">– ' + amt + ' interest</span>';
         label.appendChild(radio);
         label.appendChild(detail);
         container.appendChild(label);

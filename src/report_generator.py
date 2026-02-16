@@ -8,6 +8,7 @@ Generates detailed reports mimicking the structure of:
 """
 
 from .models import TaxReturn, TaxCalculation, ScheduleESummary, ScheduleAResult
+from .config_loader import STATES_NO_INCOME_TAX
 
 
 def fmt(amount: float) -> str:
@@ -287,6 +288,55 @@ def generate_california_report(calc: TaxCalculation) -> str:
     return "\n".join(lines)
 
 
+def generate_generic_state_report(calc: TaxCalculation) -> str:
+    """Generate a state tax report for non-CA states (e.g. New York IT-201)."""
+    lines = []
+    lines.append("")
+    lines.append(_sep("=", 72))
+    lines.append(f"  {calc.jurisdiction.upper()} STATE INCOME TAX ({calc.tax_year})")
+    lines.append(_sep("=", 72))
+
+    lines.append("\n  INCOME")
+    lines.append("  " + "-" * 68)
+    lines.append(_line("Gross Income", calc.gross_income))
+    lines.append(_line("Adjustments", calc.adjustments))
+    lines.append(_line("Adjusted Gross Income", calc.adjusted_gross_income))
+
+    lines.append("\n  DEDUCTIONS")
+    lines.append("  " + "-" * 68)
+    lines.append(_line(f"Deduction ({calc.deduction_method})", calc.deductions))
+
+    lines.append("\n  TAX COMPUTATION")
+    lines.append("  " + "-" * 68)
+    lines.append(_line("Taxable Income", calc.taxable_income))
+    if calc.bracket_breakdown:
+        lines.append("")
+        lines.append(f"  {calc.jurisdiction} Tax Bracket Breakdown:")
+        for b in calc.bracket_breakdown:
+            rate_pct = f"{b['rate']*100:.1f}%"
+            lines.append(f"    {b['bracket']:>30}  @{rate_pct:>6}  = {fmt(b['tax']):>12}")
+    lines.append("  " + "-" * 68)
+    lines.append(_line("Tax Before Credits", calc.tax_before_credits))
+    lines.append(_line("Credits", calc.credits))
+    lines.append(_line("TAX AFTER CREDITS", calc.tax_after_credits))
+
+    lines.append("\n  PAYMENTS")
+    lines.append("  " + "-" * 68)
+    lines.append(_line("State Tax Withheld", calc.tax_withheld))
+    if calc.estimated_payments > 0:
+        lines.append(_line("Estimated Payments", calc.estimated_payments))
+    lines.append(_line("Total Payments", calc.total_payments))
+
+    refund = calc.refund_or_owed
+    lines.append("\n  " + "=" * 68)
+    if refund >= 0:
+        lines.append(_line(f"{calc.jurisdiction.upper()} STATE REFUND", refund))
+    else:
+        lines.append(_line(f"{calc.jurisdiction.upper()} STATE TAX OWED", abs(refund)))
+
+    return "\n".join(lines)
+
+
 def generate_full_report(tax_return: TaxReturn) -> str:
     """
     Generate the complete Tax Summary Report.
@@ -330,6 +380,7 @@ def generate_full_report(tax_return: TaxReturn) -> str:
         lines.append("    (If you have 1099-DIV forms, verify they were parsed and amounts extracted.)")
     if inc.qualified_dividends > 0:
         lines.append(_line("  Qualified Dividends", inc.qualified_dividends))
+        lines.append("    (Verify against 1099-DIV Box 1b; set qualified_dividends in config if extraction is low.)")
     lines.append(_line("Capital Gains (1099-B/DIV)", inc.capital_gains))
     if inc.capital_gains <= 0:
         lines.append("    (If you have broker/1099-B statements with gains, set Document folder to a path that includes them, e.g. .../2025/1099/brokers.)")
@@ -357,9 +408,24 @@ def generate_full_report(tax_return: TaxReturn) -> str:
     if tax_return.federal_calculation:
         lines.append(generate_federal_report(tax_return.federal_calculation))
 
-    # California report
+    # State report: CA (Form 540), other states (generic), or message if not calculated
+    state_code = getattr(tax_return, "state_of_residence", None) or "CA"
     if tax_return.state_calculation:
-        lines.append(generate_california_report(tax_return.state_calculation))
+        if tax_return.state_calculation.jurisdiction == "California":
+            lines.append(generate_california_report(tax_return.state_calculation))
+        else:
+            lines.append(generate_generic_state_report(tax_return.state_calculation))
+    elif state_code and state_code != "CA":
+        lines.append("")
+        lines.append(_sep("-", 72))
+        lines.append(f"  STATE OF RESIDENCE: {state_code}")
+        lines.append(_sep("-", 72))
+        if state_code in STATES_NO_INCOME_TAX:
+            lines.append("  No state income tax in this state.")
+        else:
+            lines.append(f"  State income tax for {state_code} is not calculated by this tool.")
+            lines.append("  Use federal summary and W-2 state withholding for reference.")
+        lines.append("")
 
     # Combined summary
     lines.append("")
@@ -379,8 +445,8 @@ def generate_full_report(tax_return: TaxReturn) -> str:
         lines.append(_line("Federal Effective Rate", f"{fed_rate:.2f}%"))
     if state:
         state_rate = state.tax_after_credits / state.gross_income * 100 if state.gross_income > 0 else 0
-        lines.append(_line("CA Tax After Credits", state.tax_after_credits))
-        lines.append(_line("CA Effective Rate", f"{state_rate:.2f}%"))
+        lines.append(_line(f"{state.jurisdiction} Tax After Credits", state.tax_after_credits))
+        lines.append(_line(f"{state.jurisdiction} Effective Rate", f"{state_rate:.2f}%"))
 
     total_tax = (fed.tax_after_credits if fed else 0) + (state.tax_after_credits if state else 0)
     total_income = fed.gross_income if fed else (state.gross_income if state else 0)
@@ -401,10 +467,10 @@ def generate_full_report(tax_return: TaxReturn) -> str:
             lines.append(_line("  Federal Estimated Payments", fed.estimated_payments))
         lines.append(_line("  Federal Total Payments", fed.total_payments))
     if state:
-        lines.append(_line("  CA Withheld (W-2/1099)", state.tax_withheld))
+        lines.append(_line(f"  {state.jurisdiction} Withheld (W-2/1099)", state.tax_withheld))
         if state.estimated_payments > 0:
-            lines.append(_line("  CA Estimated Payments", state.estimated_payments))
-        lines.append(_line("  CA Total Payments", state.total_payments))
+            lines.append(_line(f"  {state.jurisdiction} Estimated Payments", state.estimated_payments))
+        lines.append(_line(f"  {state.jurisdiction} Total Payments", state.total_payments))
 
     total_payments = (fed.total_payments if fed else 0) + (state.total_payments if state else 0)
     lines.append("  " + "-" * 68)
@@ -435,9 +501,9 @@ def generate_full_report(tax_return: TaxReturn) -> str:
             lines.append(_line("  Federal Tax Owed", abs(fed_refund)))
     if state:
         if state_refund >= 0:
-            lines.append(_line("  CA Refund", state_refund))
+            lines.append(_line(f"  {state.jurisdiction} Refund", state_refund))
         else:
-            lines.append(_line("  CA Tax Owed", abs(state_refund)))
+            lines.append(_line(f"  {state.jurisdiction} Tax Owed", abs(state_refund)))
 
     lines.append("\n  " + "=" * 68)
     total = fed_refund + state_refund

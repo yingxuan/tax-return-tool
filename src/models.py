@@ -354,7 +354,8 @@ class TaxpayerInfo:
     age: int = 30
     is_blind: bool = False
     dependents: List[Dependent] = field(default_factory=list)
-    is_ca_resident: bool = True
+    state_of_residence: str = "CA"  # Two-letter state code (e.g. CA, NY, TX)
+    is_ca_resident: bool = True  # True when state_of_residence == "CA"
     is_renter: bool = False  # For CA Renter's Credit
 
     @property
@@ -508,6 +509,7 @@ class TaxReturn:
     tax_year: int = 2025
     federal_calculation: Optional[TaxCalculation] = None
     state_calculation: Optional[TaxCalculation] = None
+    state_of_residence: Optional[str] = None  # Two-letter code; only CA has calculated state tax
 
     # Source documents
     w2_forms: list = field(default_factory=list)
