@@ -16,7 +16,7 @@ from flask import Flask, request, render_template_string, jsonify
 # Import existing pipeline; no changes to these modules
 from .config_loader import load_config, TaxProfileConfig, US_STATES
 from .main import process_tax_documents, process_tax_return
-from .report_generator import generate_full_report
+from .report_generator import generate_full_report, generate_full_report_html
 
 app = Flask(__name__)
 
@@ -253,8 +253,9 @@ def run():
             )
 
         report = generate_full_report(tax_return)
+        report_html = generate_full_report_html(tax_return)
         info = _detect_missing(tax_return)
-        return jsonify({"report": report, **info})
+        return jsonify({"report": report, "report_html": report_html, **info})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -361,10 +362,25 @@ INDEX_HTML = """
     .error-msg { color: #c00; margin-top: 0.75rem; font-size: 0.9rem; padding: 0.5rem 0.75rem;
                  background: #fff0f0; border-radius: 6px; border: 1px solid #fcc; }
     .error-msg:empty { display: none; }
-    #report { white-space: pre-wrap; font-family: ui-monospace, 'Cascadia Code', monospace; font-size: 0.82rem;
-              background: #1e1e2e; color: #cdd6f4; padding: 1.25rem; border-radius: 10px; margin-top: 1rem;
-              max-height: 70vh; overflow: auto; line-height: 1.45; }
+    #report { margin-top: 1rem; max-height: 70vh; overflow: auto; }
     #report:empty { display: none; }
+    .report-placeholder { background: #f0f4ff; border: 1px solid #99b8e8; border-radius: 10px; padding: 1.25rem;
+                         color: #1a3a5c; font-size: 0.95rem; line-height: 1.5; }
+    .tax-report { font-family: system-ui, -apple-system, sans-serif; font-size: 0.92rem; color: #1a1a1a; }
+    .tax-report .report-header { margin-bottom: 1rem; }
+    .tax-report .report-main-title { font-size: 1.25rem; margin-bottom: 0.35rem; color: #0066cc; }
+    .tax-report .report-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.88rem; color: #555; }
+    .tax-report .report-section { background: #fff; border: 1px solid #e0e4e8; border-radius: 8px;
+                                  padding: 1rem 1.15rem; margin-bottom: 1rem; }
+    .tax-report .report-section-title { font-size: 1rem; margin: 0 0 0.65rem 0; color: #333;
+                                        padding-bottom: 0.35rem; border-bottom: 1px solid #e0e4e8; }
+    .tax-report .report-row { display: flex; justify-content: space-between; align-items: baseline;
+                              padding: 0.25rem 0; gap: 1rem; }
+    .tax-report .report-row-total { font-weight: 600; border-top: 1px solid #e0e4e8; margin-top: 0.35rem; padding-top: 0.5rem; }
+    .tax-report .report-row-highlight { font-weight: 700; color: #0066cc; }
+    .tax-report .report-label { flex: 1; }
+    .tax-report .report-amount { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .tax-report .report-disclaimer { font-size: 0.8rem; color: #777; margin-top: 1rem; }
 
     /* Dynamic field wrappers */
     .field-wrap { margin-top: 0.65rem; padding: 0.5rem 0.65rem; border-left: 3px solid #e0e4e8; }
@@ -560,7 +576,7 @@ INDEX_HTML = """
   </form>
 
   <div class="error-msg" id="message"></div>
-  <pre id="report"></pre>
+  <div id="report"></div>
 </div>
 
 <script>
@@ -787,7 +803,7 @@ INDEX_HTML = """
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     message.textContent = '';
-    report.textContent = '';
+    report.innerHTML = '';
     btnText.textContent = 'Calculating...';
     spinner.style.display = 'block';
     submitBtn.disabled = true;
@@ -799,9 +815,17 @@ INDEX_HTML = """
       if (!r.ok) {
         message.textContent = data.error || r.statusText || 'Request failed';
       } else {
-        report.textContent = data.report || '';
+        var missing = data.missing || [];
+        report.innerHTML = data.report_html || '';
+        if (!report.innerHTML && data.report) report.textContent = data.report;
+        if (missing.length > 0 && report.innerHTML) {
+          var placeholder = document.createElement('p');
+          placeholder.className = 'report-placeholder';
+          placeholder.innerHTML = 'Some items were not found in your documents. You can fill them in below and click <strong>Calculate Taxes</strong> again to update the summary.';
+          report.insertBefore(placeholder, report.firstChild);
+        }
         showStep3(data);
-        if (!hasRun) step3.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (!hasRun && missing.length > 0) step3.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     } catch (err) {
       message.textContent = err.message || 'Network error';

@@ -519,3 +519,126 @@ def generate_full_report(tax_return: TaxReturn) -> str:
     lines.append(_sep("*", 72))
 
     return "\n".join(lines)
+
+
+def _row_html(label: str, amount, css_class: str = "") -> str:
+    """One row for HTML report: label left, amount right."""
+    if isinstance(amount, (int, float)):
+        amt_str = fmt(amount)
+    else:
+        amt_str = str(amount)
+    cls = f' class="{css_class}"' if css_class else ""
+    return f'<div class="report-row"{cls}><span class="report-label">{_escape_html(label)}</span><span class="report-amount">{_escape_html(amt_str)}</span></div>'
+
+
+def _escape_html(s: str) -> str:
+    if s is None:
+        return ""
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _section_html(title: str, rows: list, level: int = 2) -> str:
+    """Section with heading and rows."""
+    tag = "h2" if level == 2 else "h3"
+    parts = [f'<section class="report-section">', f'<{tag} class="report-section-title">{_escape_html(title)}</{tag}>']
+    parts.extend(rows)
+    parts.append("</section>")
+    return "\n".join(parts)
+
+
+def generate_full_report_html(tax_return: TaxReturn) -> str:
+    """Generate the tax summary as user-friendly HTML (sections, rows, spacing)."""
+    parts = ['<div class="tax-report">']
+    tp = tax_return.taxpayer
+    inc = tax_return.income
+
+    # Header
+    parts.append(f'<section class="report-section report-header">')
+    parts.append(f'<h1 class="report-main-title">Tax Summary — {tax_return.tax_year}</h1>')
+    parts.append(f'<div class="report-meta">')
+    parts.append(f'<span><strong>{_escape_html(tp.name)}</strong></span>')
+    parts.append(f'<span>{tp.filing_status.value.replace("_", " ").title()}</span>')
+    parts.append(f'<span>Age {tp.age}</span>')
+    if tp.dependents:
+        parts.append(f'<span>{tp.num_dependents} dependent(s)</span>')
+    parts.append("</div></section>")
+
+    # Income summary
+    income_rows = [
+        _row_html("Wages (W-2)", inc.wages),
+        _row_html("Interest (1099-INT)", inc.interest_income),
+        _row_html("Dividend Income (1099-DIV)", inc.dividend_income),
+        _row_html("Qualified Dividends", inc.qualified_dividends) if inc.qualified_dividends > 0 else "",
+        _row_html("Capital Gains (1099-B/DIV)", inc.capital_gains),
+        _row_html("Self-Employment (1099-NEC)", inc.self_employment_income),
+        _row_html("Retirement (1099-R)", inc.retirement_income),
+        _row_html("Net Rental (Schedule E)", inc.rental_income),
+        _row_html("Other Income", inc.other_income),
+    ]
+    income_rows = [r for r in income_rows if r]
+    income_rows.append(_row_html("TOTAL GROSS INCOME", inc.total_income, "report-row-total"))
+    parts.append(_section_html("Income Summary", income_rows))
+
+    # Federal
+    fed = tax_return.federal_calculation
+    if fed:
+        fed_rows = [
+            _row_html("Adjusted Gross Income", fed.adjusted_gross_income),
+            _row_html("Deductions (" + fed.deduction_method + ")", fed.deductions),
+            _row_html("Taxable Income", fed.taxable_income),
+            _row_html("Tax Before Credits", fed.tax_before_credits),
+            _row_html("Credits", fed.credits),
+            _row_html("Tax After Credits", fed.tax_after_credits, "report-row-total"),
+            _row_html("Withheld", fed.tax_withheld),
+            _row_html("Estimated Payments", fed.estimated_payments) if fed.estimated_payments > 0 else "",
+            _row_html("Total Payments", fed.total_payments),
+        ]
+        fed_rows = [r for r in fed_rows if r]
+        refund = fed.refund_or_owed
+        fed_rows.append(_row_html("Refund" if refund >= 0 else "Amount Owed", abs(refund), "report-row-highlight"))
+        parts.append(_section_html("Federal (Form 1040)", fed_rows))
+
+    # State
+    state = tax_return.state_calculation
+    if state:
+        st_rows = [
+            _row_html("Taxable Income", state.taxable_income),
+            _row_html("Tax After Credits", state.tax_after_credits),
+            _row_html("Withheld", state.tax_withheld),
+            _row_html("Estimated Payments", state.estimated_payments) if state.estimated_payments > 0 else "",
+            _row_html("Total Payments", state.total_payments),
+        ]
+        st_rows = [r for r in st_rows if r]
+        refund = state.refund_or_owed
+        st_rows.append(_row_html("Refund" if refund >= 0 else "Amount Owed", abs(refund), "report-row-highlight"))
+        parts.append(_section_html(f"{state.jurisdiction} State", st_rows))
+
+    # Combined
+    if fed or state:
+        total_tax = (fed.tax_after_credits if fed else 0) + (state.tax_after_credits if state else 0)
+        fed_refund = fed.refund_or_owed if fed else 0
+        state_refund = state.refund_or_owed if state else 0
+        combined_rows = [
+            _row_html("Federal Tax (after credits)", fed.tax_after_credits) if fed else "",
+            _row_html((state.jurisdiction + " Tax (after credits)") if state else "", state.tax_after_credits) if state else "",
+            _row_html("Combined Tax Liability", total_tax, "report-row-total"),
+            _row_html("Federal Refund/Owed", fed_refund) if fed else "",
+            _row_html(state.jurisdiction + " Refund/Owed", state_refund) if state else "",
+        ]
+        combined_rows = [r for r in combined_rows if r]
+        net = fed_refund + state_refund
+        combined_rows.append(_row_html("NET REFUND" if net >= 0 else "NET TAX OWED", abs(net), "report-row-highlight"))
+        parts.append(_section_html("Combined Summary", combined_rows))
+
+    # Capital loss carryover
+    if hasattr(tax_return, "_capital_loss_carryover_applied") and tax_return._capital_loss_carryover_applied > 0:
+        carry_rows = [
+            _row_html("Prior year carryover applied", tax_return._capital_loss_carryover_applied),
+            _row_html("Amount used this year", getattr(tax_return, "_capital_loss_deductible_used", 0)),
+            _row_html("Remaining carryover", getattr(tax_return, "_capital_loss_carryover_remaining", 0)),
+        ]
+        parts.append(_section_html("Capital Loss Carryover", carry_rows))
+
+    parts.append('<p class="report-disclaimer">This calculation is for reference only. Consult a tax professional for filing.</p>')
+    parts.append("</div>")
+    return "\n".join(parts)
