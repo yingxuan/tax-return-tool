@@ -63,6 +63,9 @@ def config_from_form(form) -> TaxProfileConfig:
         document_folder=document_folder,
         rental_1098_keywords=rental_1098_keywords,
         capital_loss_carryover=_float(form, "capital_loss_carryover"),
+        short_term_loss_carryover=_float(form, "short_term_loss_carryover"),
+        long_term_loss_carryover=_float(form, "long_term_loss_carryover"),
+        pal_carryover=_float(form, "pal_carryover"),
         personal_mortgage_balance=_float(form, "personal_mortgage_balance"),
         us_treasury_interest=_float(form, "us_treasury_interest"),
         charitable_contributions=_float(form, "charitable_contributions"),
@@ -99,6 +102,9 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     if keywords_str:
         config.rental_1098_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
     config.capital_loss_carryover = _float(form, "capital_loss_carryover", config.capital_loss_carryover)
+    config.short_term_loss_carryover = _float(form, "short_term_loss_carryover", config.short_term_loss_carryover)
+    config.long_term_loss_carryover = _float(form, "long_term_loss_carryover", config.long_term_loss_carryover)
+    config.pal_carryover = _float(form, "pal_carryover", config.pal_carryover)
     config.personal_mortgage_balance = _float(form, "personal_mortgage_balance", config.personal_mortgage_balance)
     config.us_treasury_interest = _float(form, "us_treasury_interest", config.us_treasury_interest)
     config.charitable_contributions = _float(form, "charitable_contributions", config.charitable_contributions)
@@ -587,6 +593,18 @@ INDEX_HTML = """
       <div class="field-wrap" data-field="capital_loss_carryover">
         <label>Capital loss carryover from prior year <span class="label-hint">- applied up to $3,000/yr</span></label>
         <input type="number" name="capital_loss_carryover" step="0.01" value="0">
+      </div>
+      <div class="field-wrap" data-field="short_term_loss_carryover">
+        <label>Short-term loss carryover <span class="label-hint">- overrides single total above when set</span></label>
+        <input type="number" name="short_term_loss_carryover" step="0.01" value="0">
+      </div>
+      <div class="field-wrap" data-field="long_term_loss_carryover">
+        <label>Long-term loss carryover</label>
+        <input type="number" name="long_term_loss_carryover" step="0.01" value="0">
+      </div>
+      <div class="field-wrap" data-field="pal_carryover">
+        <label>PAL carryover <span class="label-hint">- prior-year passive activity loss (Form 8582)</span></label>
+        <input type="number" name="pal_carryover" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="rental_1098_keywords">
         <label>Which 1098 is for a rental property?</label>

@@ -118,6 +118,7 @@ class Form1099B:
     gain_loss: float = 0.0
     wash_sale_disallowed: float = 0.0
     market_discount: float = 0.0
+    federal_withheld: float = 0.0  # Box 4: Federal income tax withheld
     is_short_term: bool = False
     is_summary: bool = False  # True for summary-level entries (not per-transaction)
 
@@ -531,6 +532,7 @@ class TaxReturn:
 
     # Config overrides / adjustments
     federal_withheld_adjustment: float = 0.0  # Added to auto-extracted federal withholding
+    prior_pal_carryover: float = 0.0  # Prior-year passive activity loss carryover
 
     # Computed schedules
     schedule_e_summary: Optional[ScheduleESummary] = None
@@ -545,6 +547,7 @@ class TaxReturn:
         total += sum(f.federal_withheld for f in self.form_1099_misc)
         total += sum(f.federal_withheld for f in self.form_1099_nec)
         total += sum(f.federal_withheld for f in self.form_1099_r)
+        total += sum(f.federal_withheld for f in self.form_1099_b)
         total += self.federal_withheld_adjustment
         return total
 

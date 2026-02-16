@@ -82,6 +82,7 @@ class RentalPropertyConfig:
     rental_income: float = 0.0  # Gross rent (not in PM statement)
     insurance: float = 0.0
     property_tax: float = 0.0
+    other_expenses: float = 0.0  # Other expenses (gardening, telephone, etc.)
     days_rented: int = 365
     personal_use_days: int = 0
 
@@ -99,7 +100,9 @@ class TaxProfileConfig:
     dependents: List[DependentConfig] = field(default_factory=list)
     document_folder: Optional[str] = None
     rental_1098_keywords: List[str] = field(default_factory=list)
-    capital_loss_carryover: float = 0.0
+    capital_loss_carryover: float = 0.0  # Single total (legacy); use ST/LT split when available
+    short_term_loss_carryover: float = 0.0  # Prior-year ST capital loss carryover
+    long_term_loss_carryover: float = 0.0  # Prior-year LT capital loss carryover
     personal_mortgage_balance: float = 0.0  # Outstanding principal for debt limit
     us_treasury_interest: float = 0.0  # US Treasury interest (state-exempt)
     charitable_contributions: float = 0.0  # Cash charitable contributions (Schedule A)
@@ -113,6 +116,7 @@ class TaxProfileConfig:
     # Primary residence 2025 property tax total (overrides 1098 + receipts when set)
     primary_property_tax: float = 0.0
     primary_home_apn: str = ""  # APN of primary home (for multi-parcel property tax receipts)
+    pal_carryover: float = 0.0  # Prior-year passive activity loss carryover (Form 8582)
     rental_properties: List[RentalPropertyConfig] = field(default_factory=list)
 
 
@@ -172,6 +176,7 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
                 rental_income=float(rp.get("rental_income", 0.0)),
                 insurance=float(rp.get("insurance", 0.0)),
                 property_tax=float(rp.get("property_tax", 0.0)),
+                other_expenses=float(rp.get("other_expenses", 0.0)),
                 days_rented=int(rp.get("days_rented", 365)),
                 personal_use_days=int(rp.get("personal_use_days", 0)),
             ))
@@ -195,6 +200,8 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
             kw.lower() for kw in (raw.get("rental_1098_keywords") or [])
         ],
         capital_loss_carryover=float(raw.get("capital_loss_carryover", 0.0)),
+        short_term_loss_carryover=float(raw.get("short_term_loss_carryover", 0.0)),
+        long_term_loss_carryover=float(raw.get("long_term_loss_carryover", 0.0)),
         personal_mortgage_balance=float(raw.get("personal_mortgage_balance", 0.0)),
         us_treasury_interest=float(raw.get("us_treasury_interest", 0.0)),
         charitable_contributions=float(raw.get("charitable_contributions", 0.0)),
@@ -206,5 +213,6 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         qualified_dividends=float(raw.get("qualified_dividends", 0.0)),
         ordinary_dividends=float(raw.get("ordinary_dividends", 0.0)),
         primary_property_tax=float(raw.get("primary_property_tax", 0.0)),
+        pal_carryover=float(raw.get("pal_carryover", 0.0)),
         rental_properties=rental_props,
     )

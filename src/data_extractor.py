@@ -34,6 +34,15 @@ class DocumentOnly:
 
 
 @dataclass
+class HomeInsuranceRecord:
+    """Extracted home/landlord insurance premium."""
+    annual_premium: float = 0.0
+    property_address: str = ""
+    policy_period: str = ""  # e.g. "01/01/2024 - 01/01/2025"
+    source_text: str = ""  # Full document text for address matching
+
+
+@dataclass
 class PropertyTaxParcel:
     """A single parcel/property from a property tax receipt."""
     apn: str = ""
@@ -535,6 +544,19 @@ class TaxDataExtractor:
         # W-2 patterns (including variations like "W-2", "W2", "WAGE AND TAX")
         if 'W-2' in text_upper or 'W2' in text_upper or 'WAGE AND TAX' in text_upper:
             return 'W-2'
+        # 1099-G (government payments) — check BEFORE 1099-INT because 1099-G
+        # instructions often mention "Form 1099-INT" which causes false matches.
+        if 'FORM 1099-G' in text_upper or ('1099-G' in text_upper and (
+            'GOVERNMENT PAYMENTS' in text_upper or 'STATE' in text_upper
+            or 'TAX REFUND' in text_upper or 'UNEMPLOYMENT' in text_upper
+        )):
+            return '1099-G'
+        # 1099-MISC — check BEFORE 1099-DIV because MISC forms mention
+        # "dividends" in Box 8 description, causing false DIV matches.
+        if '1099-MISC' in text_upper or 'MISCELLANEOUS INCOME' in text_upper or (
+            '1099' in text_upper and 'MISCELLANEOUS' in text_upper and 'INFORMATION' in text_upper
+        ):
+            return '1099-MISC'
         # 1099-INT patterns
         if '1099-INT' in text_upper or ('1099' in text_upper and 'INTEREST INCOME' in text_upper):
             return '1099-INT'
@@ -544,15 +566,9 @@ class TaxDataExtractor:
         # 1099-NEC patterns
         if '1099-NEC' in text_upper or 'NONEMPLOYEE COMPENSATION' in text_upper:
             return '1099-NEC'
-        # 1099-MISC patterns
-        if '1099-MISC' in text_upper or 'MISCELLANEOUS INCOME' in text_upper:
-            return '1099-MISC'
         # 1099-R (retirement) patterns
         if '1099-R' in text_upper or ('1099' in text_upper and 'DISTRIBUTIONS FROM PENSIONS' in text_upper):
             return '1099-R'
-        # 1099-G (government payments) patterns
-        if '1099-G' in text_upper or ('1099' in text_upper and 'GOVERNMENT PAYMENTS' in text_upper):
-            return '1099-G'
         # 1098-T (tuition) patterns - check before generic 1098
         if '1098-T' in text_upper or ('1098' in text_upper and 'TUITION' in text_upper):
             return '1098-T'
@@ -584,6 +600,16 @@ class TaxDataExtractor:
             'FLEXIBLE SPENDING', 'DEPENDENT CARE', 'DCFSA', 'FSA',
         ]):
             return 'FSA'
+        # Home Insurance (landlord / homeowner's policy)
+        if any(kw in text_upper for kw in [
+            'HOMEOWNERS POLICY', "HOMEOWNER'S POLICY", 'LANDLORD POLICY',
+            'LANDLORD INSURANCE', 'DWELLING FIRE', 'RENTAL PROPERTY INSURANCE',
+            'DECLARATIONS PAGE', 'POLICY DECLARATIONS',
+        ]) or ('INSURANCE' in text_upper and any(kw in text_upper for kw in [
+            'ANNUAL PREMIUM', 'TOTAL PREMIUM', 'POLICY PERIOD',
+            'RENEWAL PREMIUM', 'RENEWAL BILL',
+        ])):
+            return 'Home Insurance'
         # Charitable Contribution
         if any(kw in text_upper for kw in [
             'TAX-DEDUCTIBLE', 'CHARITABLE CONTRIBUTION', 'DONATION RECEIPT',
@@ -975,8 +1001,9 @@ class TaxDataExtractor:
         warnings = []
 
         payer_name, _ = self._extract_value(text, self.FORM_1099_G_PATTERNS['payer_name'])
-        if not payer_name:
-            payer_name = "Unknown Payer"
+        if not payer_name or payer_name == "Unknown Payer":
+            # 1099-G payer is typically a state agency; default to state name from text
+            payer_name = "State Government"
 
         unemp_str, c1 = self._extract_value(text, self.FORM_1099_G_PATTERNS['unemployment_compensation'])
         refund_str, c2 = self._extract_value(text, self.FORM_1099_G_PATTERNS['state_tax_refund'])
@@ -985,6 +1012,21 @@ class TaxDataExtractor:
         unemp = self._parse_amount(unemp_str)
         refund = self._parse_amount(refund_str)
         fed = self._parse_amount(fed_str)
+
+        # If standard patterns failed, try broader patterns for state refund
+        if refund <= 0 and unemp <= 0:
+            # Try to find any dollar amount near "refund" or "Box 2"
+            box2_pats = [
+                r'(?:Box\s*2|State.*?tax\s*refund)[^\d$]*\$?\s*([\d,]+\.?\d*)',
+                r'(?:refund|overpayment)[^\d$]*\$?\s*([\d,]+\.?\d*)',
+            ]
+            for pat in box2_pats:
+                m = re.search(pat, text, re.IGNORECASE)
+                if m:
+                    refund = self._parse_amount(m.group(1))
+                    if refund > 0:
+                        c2 = 0.5
+                        break
 
         data = Form1099G(
             payer_name=payer_name.strip(),
@@ -1330,6 +1372,72 @@ class TaxDataExtractor:
             form_type='Charitable Contribution',
             data=data,
             confidence=0.6 if amount > 0 else 0.0,
+            warnings=warnings,
+        )
+
+    # ------------------------------------------------------------------
+    # Home / Landlord Insurance
+    # ------------------------------------------------------------------
+
+    def extract_home_insurance(self, document: ParsedDocument) -> ExtractionResult:
+        """Extract annual premium from a homeowner's/landlord insurance declaration."""
+        text = document.text_content
+        warnings = []
+
+        # Try to extract the annual/total premium
+        premium = 0.0
+        premium_patterns = [
+            r'(?:annual|total|policy|renewal)\s+premium[:\s]*\$?\s*([\d,]+\.?\d*)',
+            r'(?:full\s+pay)[:\s(]*\$?\s*([\d,]+\.?\d*)',
+            r'premium[:\s]*\$?\s*([\d,]+\.?\d*)',
+            r'(?:total|amount)\s+(?:due|payable)[:\s]*\$?\s*([\d,]+\.?\d*)',
+            r'\$\s*([\d,]+\.\d{2})\s*(?:annual|premium|total)',
+        ]
+        for pat in premium_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                val = self._parse_amount(m.group(1))
+                if val > 0:
+                    premium = val
+                    break
+
+        # Try to extract property address
+        address = ""
+        addr_patterns = [
+            r'Property\s+Insured[:\s]+[A-Z ]+\n(\d+[^,\n]{5,40})',
+            r'(?:PROPERTY\s+LOCATION|Insured)\s*\n.*?\n(\d+[^,\n]{5,40})',
+            r'(?:location|property|insured\s+(?:location|property))[:\s]+(\d+[^,\n]{5,40})',
+            r'(?:mailing\s+address|property\s+address)[:\s]+(\d+[^,\n]{5,40})',
+        ]
+        for pat in addr_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                address = m.group(1).strip()
+                break
+
+        # Try to extract policy period
+        policy_period = ""
+        period_m = re.search(
+            r'(?:policy\s+period|effective)[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})\s*(?:to|-)\s*(\d{1,2}/\d{1,2}/\d{2,4})',
+            text, re.IGNORECASE
+        )
+        if period_m:
+            policy_period = f"{period_m.group(1)} - {period_m.group(2)}"
+
+        if premium <= 0:
+            warnings.append("Could not extract insurance premium amount")
+
+        data = HomeInsuranceRecord(
+            annual_premium=premium,
+            property_address=address,
+            policy_period=policy_period,
+            source_text=text,
+        )
+        return ExtractionResult(
+            success=premium > 0,
+            form_type='Home Insurance',
+            data=data,
+            confidence=0.6 if premium > 0 else 0.0,
             warnings=warnings,
         )
 
@@ -1705,6 +1813,19 @@ class TaxDataExtractor:
 
         cap_gain = self._dedup_matches(cap_matches)
 
+        # --- Federal tax withheld (Box 4) ---
+        wh_matches = []
+        withheld_kw = [
+            r'4[\s.,-]+Federal\s*(?:Income\s*)?Tax\s*Withheld',
+        ]
+        for kw in withheld_kw:
+            for m in re.finditer(kw, text, re.IGNORECASE):
+                val = self._extract_line_amount(text, m)
+                if val:
+                    wh_matches.append((m.start(), val))
+
+        fed_withheld = self._dedup_matches(wh_matches)
+
         # If we only found qualified/cap_gain (e.g. broker layout), use qualified as ordinary so dividend_income is correct
         if ordinary <= 0 and qualified > 0:
             ordinary = qualified
@@ -1731,7 +1852,7 @@ class TaxDataExtractor:
             ordinary_dividends=ordinary,
             qualified_dividends=qualified,
             capital_gain_distributions=cap_gain,
-            federal_withheld=0.0,
+            federal_withheld=fed_withheld,
         )
         return ExtractionResult(
             success=True,
@@ -1762,6 +1883,13 @@ class TaxDataExtractor:
 
         if interest_box1 <= 0 and interest_box3 <= 0:
             return None
+
+        # IRS 1099-INT: Box 1 should include Box 3 per IRS rules.
+        # Some composite statements report them separately (box1=0 or box1 < box3).
+        # If Box 3 > Box 1, they're separate → ensure Box 1 includes Box 3.
+        # If Box 3 <= Box 1, Box 1 already includes Box 3 (no adjustment).
+        if interest_box3 > 0 and interest_box3 > interest_box1:
+            interest_box1 = interest_box1 + interest_box3
 
         warnings = []
         if interest_box3 > 0:
@@ -1841,8 +1969,8 @@ class TaxDataExtractor:
         )
 
         # Accumulate short-term and long-term totals across all rows
-        st_proceeds = st_basis = st_wash = st_gain = st_discount = 0.0
-        lt_proceeds = lt_basis = lt_wash = lt_gain = lt_discount = 0.0
+        st_proceeds = st_basis = st_wash = st_gain = st_discount = st_fed_wh = 0.0
+        lt_proceeds = lt_basis = lt_wash = lt_gain = lt_discount = lt_fed_wh = 0.0
 
         for term, is_short in [('Short', True), ('Long', False)]:
             pat = _SUMMARY_ROW.format(term=term)
@@ -1852,18 +1980,21 @@ class TaxDataExtractor:
                 md = self._parse_amount(m.group(4))
                 ws = self._parse_amount(m.group(5))
                 gl = self._parse_amount(m.group(6))
+                fw = self._parse_amount(m.group(7))
                 if is_short:
                     st_proceeds += p
                     st_basis += b
                     st_discount += md
                     st_wash += ws
                     st_gain += gl
+                    st_fed_wh += fw
                 else:
                     lt_proceeds += p
                     lt_basis += b
                     lt_discount += md
                     lt_wash += ws
                     lt_gain += gl
+                    lt_fed_wh += fw
 
         # --- Fallback: Box A / Box D realized gain/loss lines ---
         # (Robinhood format and Fidelity per-section TOTALS pages)
@@ -1901,9 +2032,9 @@ class TaxDataExtractor:
                     lt_gain += self._parse_amount(m.group(1))
 
         # Build results
-        for label, is_short, proceeds, basis, discount, wash, gain in [
-            ('Short-term', True, st_proceeds, st_basis, st_discount, st_wash, st_gain),
-            ('Long-term', False, lt_proceeds, lt_basis, lt_discount, lt_wash, lt_gain),
+        for label, is_short, proceeds, basis, discount, wash, gain, fed_wh in [
+            ('Short-term', True, st_proceeds, st_basis, st_discount, st_wash, st_gain, st_fed_wh),
+            ('Long-term', False, lt_proceeds, lt_basis, lt_discount, lt_wash, lt_gain, lt_fed_wh),
         ]:
             if proceeds == 0 and basis == 0 and gain == 0:
                 continue
@@ -1915,6 +2046,7 @@ class TaxDataExtractor:
                 gain_loss=gain,
                 wash_sale_disallowed=wash,
                 market_discount=discount,
+                federal_withheld=fed_wh,
                 is_short_term=is_short,
                 is_summary=True,
             )
@@ -2012,7 +2144,9 @@ class TaxDataExtractor:
             return self.extract_fsa(document)
         elif form_type == 'Charitable Contribution':
             return self.extract_charitable_contribution(document)
-        elif form_type in ('Home Insurance', '529 Plan'):
+        elif form_type == 'Home Insurance':
+            return self.extract_home_insurance(document)
+        elif form_type == '529 Plan':
             return ExtractionResult(
                 success=True,
                 form_type=form_type,

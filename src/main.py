@@ -98,20 +98,40 @@ def process_tax_return(tax_return: TaxReturn) -> TaxReturn:
         # Passive Activity Loss Limitations (Form 8582)
         # The $25,000 special allowance for rental real estate phases out
         # completely at MAGI > $150K.  Estimate MAGI without rental loss.
-        if income.rental_income < 0:
+        # Include prior-year PAL carryover from config.
+        prior_pal = tax_return.prior_pal_carryover
+        # Net passive activity: current rental income minus prior unallowed losses
+        net_passive = income.rental_income - prior_pal
+
+        if net_passive < 0:
+            # Net passive loss — apply PAL limitation rules
+            net_loss = abs(net_passive)
             preliminary_agi = income.total_income - income.rental_income
-            disallowed_loss = abs(income.rental_income)
             if preliminary_agi > 150_000:
-                income.rental_income = 0  # Disallow passive rental losses
-                schedule_e_summary.pal_disallowed = disallowed_loss
-                schedule_e_summary.pal_carryover = disallowed_loss
+                # Full disallowance: no special allowance
+                income.rental_income = 0
+                schedule_e_summary.pal_disallowed = net_loss
+                schedule_e_summary.pal_carryover = net_loss
             elif preliminary_agi > 100_000:
                 # Phase-out: $25K allowance reduced by 50% of (MAGI - $100K)
                 allowance = max(0, 25_000 - (preliminary_agi - 100_000) * 0.5)
-                allowed = min(allowance, disallowed_loss)
+                allowed = min(allowance, net_loss)
                 income.rental_income = -allowed
-                schedule_e_summary.pal_disallowed = disallowed_loss - allowed
-                schedule_e_summary.pal_carryover = disallowed_loss - allowed
+                schedule_e_summary.pal_disallowed = net_loss - allowed
+                schedule_e_summary.pal_carryover = net_loss - allowed
+            else:
+                # Below $100K AGI: full $25K allowance
+                allowance = 25_000
+                allowed = min(allowance, net_loss)
+                income.rental_income = -allowed
+                schedule_e_summary.pal_disallowed = net_loss - allowed
+                schedule_e_summary.pal_carryover = net_loss - allowed
+        elif prior_pal > 0 and net_passive >= 0:
+            # Current rental gain absorbs all prior PAL; net is still positive
+            # Report the net gain (prior PAL fully used)
+            income.rental_income = net_passive
+            schedule_e_summary.pal_disallowed = 0
+            schedule_e_summary.pal_carryover = 0
 
     # ---------------------------------------------------------------
     # Step 2: Prepare Schedule A data
@@ -347,8 +367,12 @@ def process_tax_documents(
                 if config and config.rental_1098_keywords:
                     addr = (form.property_address or "").lower()
                     path_lower = (result.source_file or "").lower()
+                    doc_text = (result.source_text or "").lower()
                     for kw in config.rental_1098_keywords:
-                        if kw.lower() in addr or (not addr and kw.lower() in path_lower):
+                        kw_lower = kw.lower()
+                        if (kw_lower in addr
+                                or kw_lower in path_lower
+                                or kw_lower in doc_text):
                             form.is_rental = True
                             break
                 tax_return.form_1098.append(form)
@@ -388,6 +412,12 @@ def process_tax_documents(
                 if tax_return.schedule_a_data is None:
                     tax_return.schedule_a_data = ScheduleAData()
                 tax_return.schedule_a_data.cash_contributions += result.data.amount
+            elif result.form_type == 'Home Insurance':
+                from src.data_extractor import HomeInsuranceRecord
+                if isinstance(result.data, HomeInsuranceRecord) and result.data.annual_premium > 0:
+                    if not hasattr(tax_return, '_insurance_records'):
+                        tax_return._insurance_records = []
+                    tax_return._insurance_records.append(result.data)
 
     # Resolve property tax receipts: split into primary (Schedule A) vs rental (Schedule E).
     # Build a unified list of parcels from all receipts.
@@ -460,8 +490,35 @@ def process_tax_documents(
         tax_return.form_1099_int.append(treasury_marker)
 
     # Apply capital loss carryover from prior year (Schedule D)
-    # First offset current-year gains, then cap any remaining net loss at $3K ($1.5K MFS)
-    if config and config.capital_loss_carryover > 0:
+    # If ST/LT split is provided, apply each to respective gain type first,
+    # then combine for the $3K net loss cap. Otherwise fall back to single total.
+    if config and (config.short_term_loss_carryover > 0 or config.long_term_loss_carryover > 0):
+        st_carry = config.short_term_loss_carryover
+        lt_carry = config.long_term_loss_carryover
+        carryover = st_carry + lt_carry
+
+        # Apply ST carryover to ST gains, LT carryover to LT gains
+        net_st = income.short_term_capital_gains - st_carry
+        net_lt = income.long_term_capital_gains - lt_carry
+        net_total = net_st + net_lt
+
+        deductible_loss = 0.0
+        if net_total >= 0:
+            remaining_carryover = 0.0
+        else:
+            cap = 1_500 if taxpayer.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY else 3_000
+            deductible_loss = min(cap, abs(net_total))
+            remaining_carryover = abs(net_total) - deductible_loss
+            net_total = -deductible_loss
+
+        income.short_term_capital_gains = net_st
+        income.long_term_capital_gains = net_lt
+        income.capital_gains = net_total
+        tax_return._capital_loss_carryover_applied = carryover
+        tax_return._capital_loss_carryover_remaining = round(remaining_carryover, 2)
+        tax_return._capital_loss_deductible_used = round(deductible_loss, 2)
+
+    elif config and config.capital_loss_carryover > 0:
         carryover = config.capital_loss_carryover
         current_gains = income.capital_gains  # Before carryover
         net = current_gains - carryover
@@ -487,14 +544,9 @@ def process_tax_documents(
     if config and config.ordinary_dividends > 0:
         income.dividend_income = config.ordinary_dividends
 
-    # Other income: auto-extracted from 1099-MISC forms.
-    # Config value is used as fallback override if auto-extraction found nothing.
-    auto_other = sum(f.other_income for f in tax_return.form_1099_misc)
-    if auto_other > 0:
-        if config and config.other_income != 0 and abs(auto_other - config.other_income) > 1.0:
-            print(f"\n  NOTE: Auto-extracted other income ${auto_other:,.2f} "
-                  f"differs from config ${config.other_income:,.2f}. Using auto-extracted value.")
-    elif config and config.other_income != 0:
+    # Other income: auto-extracted from 1099-MISC forms + 1099-G.
+    # Config value is ADDED on top of auto-extracted (for forms that failed OCR).
+    if config and config.other_income != 0:
         income.other_income += config.other_income
 
     # Apply estimated tax payments from config (before schedule_a_data creation,
@@ -519,6 +571,10 @@ def process_tax_documents(
             period="Total",
             jurisdiction="california",
         ))
+
+    # Apply prior-year PAL carryover from config
+    if config and config.pal_carryover > 0:
+        tax_return.prior_pal_carryover = config.pal_carryover
 
     # Apply federal withholding adjustment from config (optional OCR correction override)
     if config and config.federal_withheld_adjustment != 0:
@@ -601,6 +657,7 @@ def process_tax_documents(
                 rental_income=rp_cfg.rental_income,
                 insurance=rp_cfg.insurance,
                 property_tax=rp_cfg.property_tax,
+                other_expenses=rp_cfg.other_expenses,
                 days_rented=rp_cfg.days_rented,
                 personal_use_days=rp_cfg.personal_use_days,
             )
@@ -630,6 +687,36 @@ def process_tax_documents(
         extracted_rental_ptax = getattr(tax_return, '_extracted_rental_property_tax', 0.0)
         if extracted_rental_ptax > 0 and tax_return.rental_properties:
             tax_return.rental_properties[0].property_tax += extracted_rental_ptax
+
+        # Apply extracted insurance premiums to matching rental properties.
+        # Only assign to rental if the insurance doc matches a rental address
+        # (by address field or rental keywords in source text). Otherwise skip
+        # (personal home insurance is not a deductible Schedule E expense).
+        insurance_records = getattr(tax_return, '_insurance_records', [])
+        rental_keywords = [kw.lower() for kw in (config.rental_1098_keywords if config else [])]
+        for ins in insurance_records:
+            ins_addr = ins.property_address.lower()
+            ins_text = (ins.source_text or "").lower()
+            matched = False
+            for rp in tax_return.rental_properties:
+                rp_addr = rp.address.lower()
+                # Match by address keyword overlap
+                ins_words = [w for w in ins_addr.split() if len(w) > 3]
+                rp_words = [w for w in rp_addr.split() if len(w) > 3]
+                if ins_words and any(w in rp_addr for w in ins_words):
+                    rp.insurance += ins.annual_premium
+                    matched = True
+                    break
+                # Match by rental keywords in source text
+                if any(kw in ins_text for kw in rental_keywords):
+                    rp.insurance += ins.annual_premium
+                    matched = True
+                    break
+                # Match by rental property address words in source text
+                if any(w in ins_text for w in rp_words):
+                    rp.insurance += ins.annual_premium
+                    matched = True
+                    break
 
     # Override Schedule A real estate taxes from config (e.g. correct 2025 primary residence total)
     if config and config.primary_property_tax > 0:
@@ -667,6 +754,18 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
     for i, f1098 in enumerate(tax_return.form_1098, 1):
         tag = "rental" if f1098.is_rental else "personal"
         print(f"    1098 #{i}: {f1098.lender_name!r}  interest={fmt(f1098.mortgage_interest)}  [{tag}]")
+
+    # Per-form interest detail for debugging
+    if tax_return.form_1099_int:
+        print(f"\n  1099-INT detail:")
+        for i, fi in enumerate(tax_return.form_1099_int, 1):
+            print(f"    #{i}: {fi.payer_name!r}  box1={fmt(fi.interest_income)}  box3={fmt(fi.us_treasury_interest)}")
+
+    # Per-form dividend detail for debugging over/under-counting
+    if tax_return.form_1099_div:
+        print(f"\n  1099-DIV detail:")
+        for i, fd in enumerate(tax_return.form_1099_div, 1):
+            print(f"    #{i}: {fd.payer_name!r}  ord={fmt(fd.ordinary_dividends)}  qual={fmt(fd.qualified_dividends)}  capgain={fmt(fd.capital_gain_distributions)}")
 
     print(f"\n  Wages:                     {fmt(inc.wages)}")
     print(f"  Interest income:           {fmt(inc.interest_income)}")
@@ -722,6 +821,9 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
             print(f"      Gross rent:    {fmt(rp.rental_income)}")
             print(f"      Repairs:       {fmt(rp.repairs)}")
             print(f"      Mgmt fees:     {fmt(rp.management_fees)}")
+            print(f"      Insurance:     {fmt(rp.insurance)}")
+            print(f"      Property tax:  {fmt(rp.property_tax)}")
+            print(f"      Other expense: {fmt(rp.other_expenses)}")
             print(f"      Mortgage int:  {fmt(rp.mortgage_interest)}")
             print(f"      Depreciation:  {'N/A (missing purchase data)' if rp.purchase_price == 0 else fmt(rp.depreciable_basis / 27.5)}")
 

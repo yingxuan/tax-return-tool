@@ -1,0 +1,63 @@
+# Sample Tax Profile Configuration
+# Copy to tax_profile.yaml and fill in your actual values.
+# tax_profile.yaml is gitignored — your private data stays local.
+
+tax_year: 2025
+taxpayer:
+  name: "John & Jane Doe"
+  filing_status: married_jointly  # single, married_jointly, married_separately, head_of_household
+  age: 40
+  is_ca_resident: true
+  is_renter: false
+  dependents: [Child1, Child2]
+
+# Folder containing tax documents (W-2, 1099, 1098, etc.)
+# Organized by subfolder type: w2/, 1099/, 1098/, rental/, property tax/, etc.
+document_folder: "C:\\Users\\you\\Documents\\tax\\2025"
+
+# 1098 forms with lender names matching these keywords are treated as rental mortgage
+rental_1098_keywords: ["rental_property_keyword"]
+
+# Primary residence property tax (overrides auto-extracted amount)
+primary_property_tax: 0
+
+# Capital loss carryover from prior year (applied up to $3,000/year)
+capital_loss_carryover: 0
+# Optional: split into short-term and long-term (overrides single total above)
+# short_term_loss_carryover: 0
+# long_term_loss_carryover: 0
+
+# Outstanding mortgage principal on personal residence (for $750K/$1M debt limit)
+# Set to 0 to skip proration (e.g. if balance is under $750K)
+personal_mortgage_balance: 0
+
+# US Treasury interest (state-exempt, subtracted from CA gross income)
+# us_treasury_interest: 0
+
+# Cash charitable contributions (from donation receipts)
+charitable_contributions: 0
+
+# Estimated tax payments made during the year
+federal_estimated_payments: 0
+ca_estimated_payments: 0
+
+# Correction to auto-extracted federal withholding (positive adds, negative subtracts)
+# federal_withheld_adjustment: 0
+
+# Prior-year passive activity loss carryover (Form 8582)
+# pal_carryover: 0
+
+# Rental properties (Schedule E)
+# Repairs and management fees are auto-extracted from PM statements in the
+# rental/ folder. Insurance is auto-extracted from docs in the home insurance/ folder.
+# Fields below cover data NOT available in the documents.
+rental_properties:
+  - address: "123 Main St, City, CA 99999"
+    property_type: "Single Family"
+    purchase_price: 500000
+    purchase_date: "2020-01-15"
+    land_value: 200000          # Land portion (not depreciable)
+    rental_income: 36000        # Annual gross rent received
+    property_tax: 6000          # Annual property tax paid
+    other_expenses: 0           # Gardening, telephone, etc.
+    # insurance: 1200           # Only needed if no insurance doc in document_folder
