@@ -901,13 +901,26 @@ class TaxDataExtractor:
 
         dist_code, _ = self._extract_value(text, self.FORM_1099_R_PATTERNS['distribution_code'])
 
-        # If taxable amount couldn't be parsed, flag it as not determined
-        taxable_not_determined = (taxable <= 0 and gross > 0)
+        # If taxable amount couldn't be parsed, flag it as not determined.
+        # But for rollovers (code G/H) and qualified Roth distributions (code Q),
+        # taxable_amount = 0 is expected and correct — do NOT fall back to gross.
+        non_taxable_codes = {"G", "H", "Q"}
+        code_upper = (dist_code or "").strip().upper()
+        if code_upper in non_taxable_codes:
+            # Trust that taxable = 0 is intentional for these codes
+            taxable_not_determined = False
+            final_taxable = taxable  # keep 0
+        elif taxable <= 0 and gross > 0:
+            taxable_not_determined = True
+            final_taxable = gross
+        else:
+            taxable_not_determined = False
+            final_taxable = taxable
 
         data = Form1099R(
             payer_name=payer_name.strip() if payer_name else "Unknown",
             gross_distribution=gross,
-            taxable_amount=taxable if taxable > 0 else gross,
+            taxable_amount=final_taxable,
             taxable_amount_not_determined=taxable_not_determined,
             federal_withheld=fed_withheld,
             distribution_code=dist_code if dist_code else "",

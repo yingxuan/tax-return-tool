@@ -319,8 +319,13 @@ def process_tax_documents(
             elif result.form_type == '1099-R':
                 form = result.data
                 tax_return.form_1099_r.append(form)
-                # Code G = direct rollover; do not add to taxable income
-                if (form.distribution_code or "").strip().upper() != "G":
+                # Non-taxable distribution codes:
+                #   G = direct rollover to another plan
+                #   H = direct rollover from designated Roth account
+                #   Q = qualified Roth IRA distribution (5-yr rule + age 59.5)
+                dist_code = (form.distribution_code or "").strip().upper()
+                non_taxable_codes = {"G", "H", "Q"}
+                if dist_code not in non_taxable_codes:
                     income.retirement_income += form.taxable_amount
             elif result.form_type == 'Misc Deduction':
                 form = result.data

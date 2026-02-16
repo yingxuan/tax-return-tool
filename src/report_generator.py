@@ -595,7 +595,8 @@ def generate_full_report_html(tax_return: TaxReturn) -> str:
         ]
         fed_rows = [r for r in fed_rows if r]
         refund = fed.refund_or_owed
-        fed_rows.append(_row_html("Refund" if refund >= 0 else "Amount Owed", abs(refund), "report-row-highlight"))
+        fed_rows.append(_row_html("Refund" if refund >= 0 else "Amount Owed", abs(refund),
+                                  "report-row-highlight " + ("report-row-refund" if refund >= 0 else "report-row-owed")))
         parts.append(_section_html("Federal (Form 1040)", fed_rows))
 
     # State
@@ -610,7 +611,8 @@ def generate_full_report_html(tax_return: TaxReturn) -> str:
         ]
         st_rows = [r for r in st_rows if r]
         refund = state.refund_or_owed
-        st_rows.append(_row_html("Refund" if refund >= 0 else "Amount Owed", abs(refund), "report-row-highlight"))
+        st_rows.append(_row_html("Refund" if refund >= 0 else "Amount Owed", abs(refund),
+                                 "report-row-highlight " + ("report-row-refund" if refund >= 0 else "report-row-owed")))
         parts.append(_section_html(f"{state.jurisdiction} State", st_rows))
 
     # Combined
@@ -627,7 +629,8 @@ def generate_full_report_html(tax_return: TaxReturn) -> str:
         ]
         combined_rows = [r for r in combined_rows if r]
         net = fed_refund + state_refund
-        combined_rows.append(_row_html("NET REFUND" if net >= 0 else "NET TAX OWED", abs(net), "report-row-highlight"))
+        combined_rows.append(_row_html("NET REFUND" if net >= 0 else "NET TAX OWED", abs(net),
+                                       "report-row-highlight " + ("report-row-refund" if net >= 0 else "report-row-owed")))
         parts.append(_section_html("Combined Summary", combined_rows))
 
     # Capital loss carryover

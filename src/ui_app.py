@@ -282,127 +282,191 @@ INDEX_HTML = """
   <title>Tax Return Tool</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: #f5f7fa; color: #1a1a1a; }
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #1a1a1a; }
     .container { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
-    .subtitle { color: #555; margin-bottom: 1.5rem; font-size: 0.95rem; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.25rem; font-weight: 700;
+         background: linear-gradient(135deg, #1a56db, #0ea5e9); -webkit-background-clip: text;
+         -webkit-text-fill-color: transparent; background-clip: text; }
+    .subtitle { color: #64748b; margin-bottom: 1.5rem; font-size: 0.93rem; line-height: 1.5; }
 
     /* Privacy banner */
-    .banner { display: flex; align-items: flex-start; gap: 0.5rem; background: #eef6ee; border: 1px solid #b6d7b6;
-              border-radius: 8px; padding: 0.6rem 0.85rem; margin-bottom: 1.25rem; font-size: 0.88rem; color: #2a5a2a; }
+    .banner { display: flex; align-items: flex-start; gap: 0.5rem; background: #ecfdf5; border: 1px solid #a7f3d0;
+              border-radius: 10px; padding: 0.65rem 0.9rem; margin-bottom: 1.25rem; font-size: 0.88rem; color: #065f46; }
     .banner svg { flex-shrink: 0; margin-top: 2px; }
 
     /* Steps */
-    .step { background: #fff; border: 1px solid #dde1e6; border-radius: 10px; padding: 1.25rem 1.25rem 1rem;
-            margin-bottom: 1rem; }
+    .step { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.3rem 1.3rem 1.1rem;
+            margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            transition: box-shadow 0.2s, transform 0.2s; }
+    .step:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04); }
     .step-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
-    .step-num { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
-                border-radius: 50%; background: #0066cc; color: #fff; font-size: 0.85rem; font-weight: 600;
-                flex-shrink: 0; }
-    .step-title { font-size: 1.05rem; font-weight: 600; }
+    .step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+                border-radius: 50%; background: linear-gradient(135deg, #1a56db, #3b82f6); color: #fff;
+                font-size: 0.85rem; font-weight: 700; flex-shrink: 0; }
+    .step-title { font-size: 1.08rem; font-weight: 600; color: #1e293b; }
 
     /* Form fields */
-    label { display: block; margin-top: 0.75rem; font-weight: 500; font-size: 0.92rem; }
+    label { display: block; margin-top: 0.75rem; font-weight: 500; font-size: 0.92rem; color: #334155; }
     label:first-child { margin-top: 0; }
-    .label-hint { font-weight: 400; color: #666; font-size: 0.84rem; }
+    .label-hint { font-weight: 400; color: #94a3b8; font-size: 0.84rem; }
     input[type="text"], input[type="number"], select {
-      width: 100%; padding: 0.45rem 0.55rem; margin-top: 0.2rem; border: 1px solid #ccc;
-      border-radius: 6px; font-size: 0.92rem; background: #fff; }
+      width: 100%; padding: 0.5rem 0.65rem; margin-top: 0.25rem; border: 1.5px solid #cbd5e1;
+      border-radius: 8px; font-size: 0.92rem; background: #f8fafc;
+      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s; }
+    input[type="text"]:hover, input[type="number"]:hover, select:hover { border-color: #94a3b8; }
     input[type="text"]:focus, input[type="number"]:focus, select:focus {
-      outline: none; border-color: #0066cc; box-shadow: 0 0 0 2px rgba(0,102,204,0.15); }
+      outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); background: #fff; }
+    input[type="number"].input-valid { border-color: #22c55e; background: #f0fdf4; }
+    input[type="number"].input-invalid { border-color: #ef4444; background: #fef2f2; }
     .field-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
     .field-row > * { flex: 1; min-width: 140px; }
     .checkbox-row { display: flex; gap: 1.25rem; align-items: center; margin-top: 0.75rem; }
     .checkbox-row label { margin-top: 0; font-weight: 400; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; }
-    .hint { font-size: 0.82rem; color: #777; margin-top: 0.2rem; line-height: 1.3; }
+    .hint { font-size: 0.82rem; color: #94a3b8; margin-top: 0.2rem; line-height: 1.3; }
 
     /* Drop zone */
     .drop-zone {
-      border: 2px dashed #b0b8c4; border-radius: 10px; padding: 1.5rem; text-align: center;
-      margin-top: 0.75rem; background: #fafbfc; transition: all 0.15s; cursor: pointer; }
-    .drop-zone:hover { border-color: #0066cc; background: #f0f6ff; }
-    .drop-zone.dragover { border-color: #0066cc; background: #e0edff; border-style: solid; }
-    .drop-zone-icon { font-size: 1.8rem; margin-bottom: 0.3rem; color: #888; }
-    .drop-zone p { margin: 0.25rem 0; color: #555; font-size: 0.9rem; }
+      border: 2px dashed #94a3b8; border-radius: 12px; padding: 1.5rem; text-align: center;
+      margin-top: 0.75rem; background: #f8fafc; transition: all 0.2s ease; cursor: pointer; }
+    .drop-zone:hover { border-color: #3b82f6; background: #eff6ff; }
+    .drop-zone.dragover { border-color: #3b82f6; background: #dbeafe; border-style: solid; }
+    .drop-zone-icon { font-size: 2rem; margin-bottom: 0.4rem; }
+    .drop-zone p { margin: 0.25rem 0; color: #64748b; font-size: 0.9rem; }
     .drop-zone .browse-links { margin-top: 0.5rem; }
-    .link-btn { background: none; border: none; color: #0066cc; cursor: pointer; padding: 0.2rem 0.4rem;
-                font-size: 0.9rem; text-decoration: underline; font-weight: 500; }
-    .link-btn:hover { color: #004499; }
-    .file-list { font-size: 0.85rem; color: #333; text-align: left; max-height: 120px; overflow: auto;
-                 margin-top: 0.5rem; padding: 0 0.5rem; }
-    .file-count { display: inline-block; background: #e0edff; color: #0055aa; font-size: 0.82rem;
-                  padding: 0.15rem 0.55rem; border-radius: 12px; margin-top: 0.4rem; font-weight: 500; }
-    .or-divider { display: flex; align-items: center; gap: 0.75rem; margin: 0.9rem 0; color: #999; font-size: 0.85rem; }
-    .or-divider::before, .or-divider::after { content: ""; flex: 1; border-top: 1px solid #ddd; }
+    .link-btn { background: none; border: none; color: #3b82f6; cursor: pointer; padding: 0.2rem 0.4rem;
+                font-size: 0.9rem; text-decoration: underline; font-weight: 500; transition: color 0.15s; }
+    .link-btn:hover { color: #1d4ed8; }
+    .file-list { font-size: 0.84rem; color: #475569; text-align: left; max-height: 140px; overflow: auto;
+                 margin-top: 0.6rem; padding: 0 0.25rem; }
+    .file-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.35rem; border-radius: 4px; }
+    .file-item:hover { background: #f1f5f9; }
+    .file-icon { font-size: 0.9rem; flex-shrink: 0; width: 1.2rem; text-align: center; }
+    .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; justify-content: center; }
+    .file-count { display: inline-flex; align-items: center; gap: 0.3rem; background: #dbeafe; color: #1e40af;
+                  font-size: 0.82rem; padding: 0.2rem 0.65rem; border-radius: 12px; font-weight: 600;
+                  transition: transform 0.2s; }
+    .file-count.pop { animation: pop 0.3s ease; }
+    @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+    .clear-btn { background: none; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.15rem 0.5rem;
+                 font-size: 0.8rem; color: #64748b; cursor: pointer; transition: all 0.15s; }
+    .clear-btn:hover { background: #fef2f2; border-color: #fca5a5; color: #dc2626; }
+    .or-divider { display: flex; align-items: center; gap: 0.75rem; margin: 0.9rem 0; color: #94a3b8; font-size: 0.85rem; }
+    .or-divider::before, .or-divider::after { content: ""; flex: 1; border-top: 1px solid #e2e8f0; }
 
     /* Collapsible advanced */
-    .toggle-btn { background: none; border: 1px solid #dde1e6; border-radius: 8px; padding: 0.5rem 0.85rem;
-                  cursor: pointer; font-size: 0.9rem; color: #444; display: flex; align-items: center;
-                  gap: 0.4rem; margin-top: 0.75rem; width: 100%; }
-    .toggle-btn:hover { background: #f5f7fa; border-color: #bbb; }
+    .toggle-btn { background: none; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.5rem 0.85rem;
+                  cursor: pointer; font-size: 0.9rem; color: #475569; display: flex; align-items: center;
+                  gap: 0.4rem; margin-top: 0.75rem; width: 100%; transition: all 0.15s; }
+    .toggle-btn:hover { background: #f8fafc; border-color: #94a3b8; }
     .toggle-arrow { transition: transform 0.2s; font-size: 0.75rem; }
     .toggle-arrow.open { transform: rotate(90deg); }
     .collapsible { display: none; margin-top: 0.5rem; }
     .collapsible.open { display: block; }
-    .field-group { border-left: 3px solid #e0e4e8; padding-left: 0.85rem; margin-top: 0.75rem; }
-    .field-group-title { font-size: 0.82rem; font-weight: 600; color: #777; text-transform: uppercase;
+    .field-group { border-left: 3px solid #e2e8f0; padding-left: 0.85rem; margin-top: 0.75rem; }
+    .field-group-title { font-size: 0.82rem; font-weight: 600; color: #94a3b8; text-transform: uppercase;
                          letter-spacing: 0.04em; margin-bottom: 0.25rem; }
+
+    /* Step 3 fade-in */
+    .step-fadein { animation: fadeSlideIn 0.4s ease-out; }
+    @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Run button */
     .run-btn { display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%;
-               padding: 0.75rem; margin-top: 1.25rem; cursor: pointer; background: #0066cc; color: #fff;
-               border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; transition: background 0.15s; }
-    .run-btn:hover { background: #0055aa; }
-    .run-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+               padding: 0.8rem; margin-top: 1.25rem; cursor: pointer;
+               background: linear-gradient(135deg, #1a56db, #3b82f6); color: #fff;
+               border: none; border-radius: 10px; font-size: 1rem; font-weight: 600;
+               transition: all 0.2s; box-shadow: 0 2px 8px rgba(26,86,219,0.25); }
+    .run-btn:hover { box-shadow: 0 4px 16px rgba(26,86,219,0.35); transform: translateY(-1px); }
+    .run-btn:active { transform: translateY(0); }
+    .run-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+    .run-btn.pulse { animation: btnPulse 1.5s ease-in-out infinite; }
+    @keyframes btnPulse { 0%, 100% { box-shadow: 0 2px 8px rgba(26,86,219,0.25); }
+                          50% { box-shadow: 0 2px 20px rgba(26,86,219,0.5); } }
     .spinner { display: none; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.3);
                border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Loading overlay */
+    .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.4);
+                       backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;
+                       flex-direction: column; gap: 1rem; }
+    .loading-overlay.active { display: flex; }
+    .overlay-spinner { width: 44px; height: 44px; border: 3px solid rgba(255,255,255,0.2);
+                       border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    .overlay-text { color: #fff; font-size: 1rem; font-weight: 500; }
+
     /* Report */
-    .error-msg { color: #c00; margin-top: 0.75rem; font-size: 0.9rem; padding: 0.5rem 0.75rem;
-                 background: #fff0f0; border-radius: 6px; border: 1px solid #fcc; }
+    .error-msg { color: #dc2626; margin-top: 0.75rem; font-size: 0.9rem; padding: 0.6rem 0.85rem;
+                 background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; }
     .error-msg:empty { display: none; }
-    #report { margin-top: 1rem; max-height: 70vh; overflow: auto; }
+    #report { margin-top: 1rem; }
     #report:empty { display: none; }
-    .report-placeholder { background: #f0f4ff; border: 1px solid #99b8e8; border-radius: 10px; padding: 1.25rem;
-                         color: #1a3a5c; font-size: 0.95rem; line-height: 1.5; }
-    .tax-report { font-family: system-ui, -apple-system, sans-serif; font-size: 0.92rem; color: #1a1a1a; }
+    .report-fadein { animation: fadeSlideIn 0.5s ease-out; }
+    .report-toolbar { display: flex; gap: 0.5rem; justify-content: flex-end; margin-bottom: 0.75rem; }
+    .report-toolbar button { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem;
+                             border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; font-size: 0.82rem;
+                             color: #475569; cursor: pointer; transition: all 0.15s; }
+    .report-toolbar button:hover { background: #f1f5f9; border-color: #94a3b8; }
+    .report-toolbar button.copied { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+    .report-placeholder { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 1.25rem;
+                         color: #1e40af; font-size: 0.95rem; line-height: 1.5; }
+    .tax-report { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.92rem; color: #1e293b; }
     .tax-report .report-header { margin-bottom: 1rem; }
-    .tax-report .report-main-title { font-size: 1.25rem; margin-bottom: 0.35rem; color: #0066cc; }
-    .tax-report .report-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.88rem; color: #555; }
-    .tax-report .report-section { background: #fff; border: 1px solid #e0e4e8; border-radius: 8px;
-                                  padding: 1rem 1.15rem; margin-bottom: 1rem; }
-    .tax-report .report-section-title { font-size: 1rem; margin: 0 0 0.65rem 0; color: #333;
-                                        padding-bottom: 0.35rem; border-bottom: 1px solid #e0e4e8; }
+    .tax-report .report-main-title { font-size: 1.3rem; margin-bottom: 0.35rem; font-weight: 700;
+                                     background: linear-gradient(135deg, #1a56db, #0ea5e9);
+                                     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .tax-report .report-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; font-size: 0.88rem; color: #64748b; }
+    .tax-report .report-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+                                  padding: 1.1rem 1.2rem; margin-bottom: 1rem;
+                                  box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .tax-report .report-section-title { font-size: 1rem; margin: 0 0 0.65rem 0; color: #1e293b; font-weight: 600;
+                                        padding-bottom: 0.4rem; border-bottom: 2px solid #e2e8f0; }
     .tax-report .report-row { display: flex; justify-content: space-between; align-items: baseline;
-                              padding: 0.25rem 0; gap: 1rem; }
-    .tax-report .report-row-total { font-weight: 600; border-top: 1px solid #e0e4e8; margin-top: 0.35rem; padding-top: 0.5rem; }
-    .tax-report .report-row-highlight { font-weight: 700; color: #0066cc; }
+                              padding: 0.3rem 0; gap: 1rem; }
+    .tax-report .report-row-total { font-weight: 600; border-top: 2px solid #e2e8f0; margin-top: 0.4rem; padding-top: 0.55rem; }
+    .tax-report .report-row-highlight { font-weight: 700; font-size: 0.95rem; padding: 0.4rem 0; }
+    .tax-report .report-row-refund { color: #16a34a; }
+    .tax-report .report-row-refund .report-amount { color: #16a34a; }
+    .tax-report .report-row-owed { color: #dc2626; }
+    .tax-report .report-row-owed .report-amount { color: #dc2626; }
     .tax-report .report-label { flex: 1; }
-    .tax-report .report-amount { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-    .tax-report .report-disclaimer { font-size: 0.8rem; color: #777; margin-top: 1rem; }
+    .tax-report .report-amount { flex-shrink: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .tax-report .report-disclaimer { font-size: 0.8rem; color: #94a3b8; margin-top: 1rem; padding: 0.75rem;
+                                     background: #f8fafc; border-radius: 8px; }
+
+    /* Combined summary gradient */
+    .tax-report .report-section:last-of-type { background: linear-gradient(135deg, #fafbff, #f0f4ff);
+                                                border-color: #c7d2fe; }
 
     /* Dynamic field wrappers */
-    .field-wrap { margin-top: 0.65rem; padding: 0.5rem 0.65rem; border-left: 3px solid #e0e4e8; }
+    .field-wrap { margin-top: 0.65rem; padding: 0.55rem 0.7rem; border-left: 3px solid #cbd5e1;
+                  border-radius: 0 6px 6px 0; background: #f8fafc; }
     .field-wrap label:first-child { margin-top: 0; }
 
     /* Lender radio options */
-    .lender-option { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.65rem;
-                     margin-top: 0.35rem; border: 1px solid #dde1e6; border-radius: 6px; cursor: pointer; }
-    .lender-option:hover { background: #f0f4ff; border-color: #99b8e8; }
-    .lender-option.selected { background: #e8f0fe; border-color: #0066cc; }
-    .lender-option input[type="radio"] { margin: 0; }
+    .lender-option { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.7rem;
+                     margin-top: 0.35rem; border: 1.5px solid #e2e8f0; border-radius: 8px; cursor: pointer;
+                     transition: all 0.15s; }
+    .lender-option:hover { background: #eff6ff; border-color: #93c5fd; }
+    .lender-option.selected { background: #dbeafe; border-color: #3b82f6; }
+    .lender-option input[type="radio"] { margin: 0; accent-color: #3b82f6; }
     .lender-detail { font-size: 0.9rem; }
     .lender-detail .lender-name { font-weight: 500; }
-    .lender-detail .lender-amt { color: #555; font-size: 0.84rem; }
-    .lender-none { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.65rem;
-                   margin-top: 0.35rem; border: 1px solid #dde1e6; border-radius: 6px; cursor: pointer; }
-    .lender-none:hover { background: #f0f4ff; border-color: #99b8e8; }
-    .lender-none.selected { background: #e8f0fe; border-color: #0066cc; }
+    .lender-detail .lender-amt { color: #64748b; font-size: 0.84rem; }
+    .lender-none { display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.7rem;
+                   margin-top: 0.35rem; border: 1.5px solid #e2e8f0; border-radius: 8px; cursor: pointer;
+                   transition: all 0.15s; }
+    .lender-none:hover { background: #eff6ff; border-color: #93c5fd; }
+    .lender-none.selected { background: #dbeafe; border-color: #3b82f6; }
 
     /* YAML config upload */
     .yaml-upload { margin-top: 0.75rem; }
     .yaml-upload input[type="file"] { font-size: 0.88rem; }
+
+    /* Print styles */
+    @media print { .banner, .run-btn, .report-toolbar, .drop-zone, .step:not(#step3) { display: none !important; }
+                   .step, .tax-report .report-section { box-shadow: none !important; break-inside: avoid; } }
   </style>
 </head>
 <body>
@@ -579,6 +643,11 @@ INDEX_HTML = """
   <div id="report"></div>
 </div>
 
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="overlay-spinner"></div>
+  <div class="overlay-text">Calculating taxes...</div>
+</div>
+
 <script>
   const form = document.getElementById('form');
   const dropZone = document.getElementById('dropZone');
@@ -596,6 +665,7 @@ INDEX_HTML = """
   const advancedToggle = document.getElementById('advancedToggle');
   const advancedSection = document.getElementById('advancedSection');
   const advancedArrow = document.getElementById('advancedArrow');
+  const loadingOverlay = document.getElementById('loadingOverlay');
 
   /* Advanced toggle */
   advancedToggle.addEventListener('click', () => {
@@ -605,6 +675,15 @@ INDEX_HTML = """
 
   const droppedFiles = [];
   const ALLOWED_EXT = new Set(['.pdf','.csv','.xlsx','.xls','.jpg','.jpeg','.png','.tiff','.tif','.bmp']);
+
+  /* File type icon helper */
+  function fileIcon(name) {
+    const ext = (name || '').toLowerCase().split('.').pop();
+    if (ext === 'pdf') return '\\u{1F4C4}';
+    if (['jpg','jpeg','png','tiff','tif','bmp'].includes(ext)) return '\\u{1F5BC}';
+    if (['csv','xlsx','xls'].includes(ext)) return '\\u{1F4CA}';
+    return '\\u{1F4CE}';
+  }
 
   selectFilesBtn.addEventListener('click', (e) => { e.preventDefault(); fileInput.click(); });
   selectFolderBtn.addEventListener('click', (e) => { e.preventDefault(); folderInput.click(); });
@@ -692,20 +771,64 @@ INDEX_HTML = """
     files.forEach(f => dt.items.add(f));
     return dt.files;
   }
+  function clearFiles() {
+    droppedFiles.length = 0;
+    fileInput.value = '';
+    renderFileList();
+    submitBtn.classList.remove('pulse');
+  }
   function renderFileList() {
     if (droppedFiles.length === 0) {
-      fileList.textContent = '';
+      fileList.innerHTML = '';
       fileCount.style.display = 'none';
+      document.getElementById('fileClearBtn')?.remove();
+      submitBtn.classList.remove('pulse');
       return;
     }
-    fileList.textContent = droppedFiles.map(f => f.name).join('\\n');
-    fileCount.textContent = droppedFiles.length + ' file' + (droppedFiles.length === 1 ? '' : 's') + ' selected';
-    fileCount.style.display = 'inline-block';
+    fileList.innerHTML = droppedFiles.map(f =>
+      '<div class="file-item"><span class="file-icon">' + fileIcon(f.name) + '</span><span class="file-name">' + f.name + '</span></div>'
+    ).join('');
+    /* File actions: count badge + clear button */
+    let actionsEl = document.getElementById('fileActions');
+    if (!actionsEl) {
+      actionsEl = document.createElement('div');
+      actionsEl.className = 'file-actions';
+      actionsEl.id = 'fileActions';
+      fileCount.parentNode.insertBefore(actionsEl, fileCount.nextSibling);
+    }
+    fileCount.textContent = droppedFiles.length + ' file' + (droppedFiles.length === 1 ? '' : 's');
+    fileCount.style.display = 'inline-flex';
+    fileCount.classList.remove('pop');
+    void fileCount.offsetWidth;
+    fileCount.classList.add('pop');
+    actionsEl.innerHTML = '';
+    actionsEl.appendChild(fileCount);
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button'; clearBtn.className = 'clear-btn'; clearBtn.textContent = 'Clear all';
+    clearBtn.id = 'fileClearBtn';
+    clearBtn.addEventListener('click', clearFiles);
+    actionsEl.appendChild(clearBtn);
+    /* Pulse CTA on calculate button */
+    submitBtn.classList.add('pulse');
   }
+
+  /* Input validation visual feedback */
+  document.querySelectorAll('input[type="number"]').forEach(inp => {
+    inp.addEventListener('input', () => {
+      inp.classList.remove('input-valid', 'input-invalid');
+      if (inp.value === '' || inp.value === '0') return;
+      if (inp.validity.valid && !isNaN(parseFloat(inp.value))) {
+        inp.classList.add('input-valid');
+      } else {
+        inp.classList.add('input-invalid');
+      }
+    });
+  });
 
   const step3 = document.getElementById('step3');
   const step3Hint = document.getElementById('step3Hint');
   let hasRun = false;
+  let plainTextReport = '';
 
   function showStep3(data) {
     const missing = data.missing || [];
@@ -724,6 +847,7 @@ INDEX_HTML = """
       });
       if (anyVisible || missing.length > 0) {
         step3.style.display = '';
+        step3.classList.add('step-fadein');
         step3Hint.textContent = 'These items were not found in your documents. Fill in any that apply, then re-run.';
       }
     }
@@ -742,7 +866,7 @@ INDEX_HTML = """
         const amt = Number(opt.interest).toLocaleString('en-US', {style:'currency', currency:'USD'});
         var primary = opt.display_label || opt.lender;
         detail.innerHTML = '<span class="lender-name">' + primary + '</span>'
-          + ' <span class="lender-amt">– ' + amt + ' interest</span>';
+          + ' <span class="lender-amt">' + String.fromCharCode(8211) + ' ' + amt + ' interest</span>';
         label.appendChild(radio);
         label.appendChild(detail);
         container.appendChild(label);
@@ -800,6 +924,39 @@ INDEX_HTML = """
     hasRun = true;
   }
 
+  /* Report toolbar: copy + print */
+  function addReportToolbar() {
+    const existing = document.querySelector('.report-toolbar');
+    if (existing) existing.remove();
+    const toolbar = document.createElement('div');
+    toolbar.className = 'report-toolbar';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.innerHTML = '\\u{1F4CB} Copy';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(plainTextReport).then(() => {
+        copyBtn.classList.add('copied');
+        copyBtn.innerHTML = '\\u2713 Copied';
+        setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.innerHTML = '\\u{1F4CB} Copy'; }, 2000);
+      });
+    });
+    const printBtn = document.createElement('button');
+    printBtn.type = 'button';
+    printBtn.innerHTML = '\\u{1F5A8} Print';
+    printBtn.addEventListener('click', () => window.print());
+    toolbar.appendChild(copyBtn);
+    toolbar.appendChild(printBtn);
+    report.insertBefore(toolbar, report.firstChild);
+  }
+
+  /* Disable/enable all form inputs */
+  function setFormDisabled(disabled) {
+    form.querySelectorAll('input, select, button').forEach(el => {
+      if (el.id === 'submitBtn') return;
+      el.disabled = disabled;
+    });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     message.textContent = '';
@@ -807,6 +964,9 @@ INDEX_HTML = """
     btnText.textContent = 'Calculating...';
     spinner.style.display = 'block';
     submitBtn.disabled = true;
+    submitBtn.classList.remove('pulse');
+    loadingOverlay.classList.add('active');
+    setFormDisabled(true);
     const fd = new FormData(form);
     for (const f of droppedFiles) fd.append('documents', f);
     try {
@@ -816,20 +976,28 @@ INDEX_HTML = """
         message.textContent = data.error || r.statusText || 'Request failed';
       } else {
         var missing = data.missing || [];
-        report.innerHTML = data.report_html || '';
-        if (!report.innerHTML && data.report) report.textContent = data.report;
-        if (missing.length > 0 && report.innerHTML) {
-          var placeholder = document.createElement('p');
-          placeholder.className = 'report-placeholder';
-          placeholder.innerHTML = 'Some items were not found in your documents. You can fill them in below and click <strong>Calculate Taxes</strong> again to update the summary.';
-          report.insertBefore(placeholder, report.firstChild);
-        }
+        plainTextReport = data.report || '';
+        var isFirstRun = !hasRun;
         showStep3(data);
-        if (!hasRun && missing.length > 0) step3.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        /* First run with missing fields: show only Step 3, hide report */
+        if (isFirstRun && missing.length > 0) {
+          report.innerHTML = '';
+          step3.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          report.innerHTML = data.report_html || '';
+          if (!report.innerHTML && data.report) report.textContent = data.report;
+          if (report.innerHTML) {
+            report.classList.add('report-fadein');
+            addReportToolbar();
+            setTimeout(() => report.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+          }
+        }
       }
     } catch (err) {
       message.textContent = err.message || 'Network error';
     }
+    loadingOverlay.classList.remove('active');
+    setFormDisabled(false);
     btnText.textContent = 'Calculate Taxes';
     spinner.style.display = 'none';
     submitBtn.disabled = false;
