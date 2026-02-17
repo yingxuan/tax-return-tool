@@ -12,3 +12,6 @@ PyYAML>=6.0
 
 # Web UI
 Flask>=3.0.0
+
+# PDF form filling
+pypdf>=4.0.0

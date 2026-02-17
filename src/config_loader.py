@@ -97,6 +97,8 @@ class TaxProfileConfig:
     state_of_residence: str = "CA"  # Two-letter state code; CA = California (only state with calculated tax)
     is_ca_resident: bool = True  # Derived from state_of_residence == "CA"
     is_renter: bool = False
+    address_line1: str = ""  # Street address
+    address_line2: str = ""  # City, State ZIP
     dependents: List[DependentConfig] = field(default_factory=list)
     document_folder: Optional[str] = None
     rental_1098_keywords: List[str] = field(default_factory=list)
@@ -194,6 +196,8 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         state_of_residence=state_of_residence,
         is_ca_resident=is_ca_resident,
         is_renter=taxpayer.get("is_renter", False),
+        address_line1=taxpayer.get("address_line1", ""),
+        address_line2=taxpayer.get("address_line2", ""),
         dependents=deps,
         document_folder=raw.get("document_folder"),
         rental_1098_keywords=[

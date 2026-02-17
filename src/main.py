@@ -246,6 +246,8 @@ def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
         state_of_residence=getattr(config, "state_of_residence", "CA"),
         is_ca_resident=config.is_ca_resident,
         is_renter=config.is_renter,
+        address_line1=getattr(config, "address_line1", ""),
+        address_line2=getattr(config, "address_line2", ""),
         dependents=deps,
     )
 
@@ -1064,6 +1066,15 @@ def main():
         help="Run with comprehensive sample demo data"
     )
     parser.add_argument(
+        "--pdf", action="store_true",
+        help="Generate filled PDF tax forms (requires templates in pdf_templates/)"
+    )
+    parser.add_argument(
+        "--pdf-output",
+        default=None,
+        help="Output directory for PDF forms (default: output/<year>/)"
+    )
+    parser.add_argument(
         "--filing-status",
         choices=["single", "married_jointly", "married_separately", "head_of_household"],
         default=None,
@@ -1086,7 +1097,10 @@ def main():
         return
 
     if args.demo:
-        run_demo()
+        tax_return = run_demo()
+        if args.pdf:
+            from .form_filler import generate_all_forms
+            generate_all_forms(tax_return, output_dir=args.pdf_output or "")
         return
 
     # Load config if specified
@@ -1122,6 +1136,10 @@ def main():
 
     report = generate_full_report(tax_return)
     print(report)
+
+    if args.pdf:
+        from .form_filler import generate_all_forms
+        generate_all_forms(tax_return, output_dir=args.pdf_output or "")
 
 
 if __name__ == "__main__":

@@ -358,6 +358,8 @@ class TaxpayerInfo:
     state_of_residence: str = "CA"  # Two-letter state code (e.g. CA, NY, TX)
     is_ca_resident: bool = True  # True when state_of_residence == "CA"
     is_renter: bool = False  # For CA Renter's Credit
+    address_line1: str = ""  # Street address (e.g. "123 Main St")
+    address_line2: str = ""  # City, State ZIP (e.g. "San Jose, CA 95123")
 
     @property
     def num_dependents(self) -> int:
