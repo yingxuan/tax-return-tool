@@ -149,6 +149,8 @@ def map_f1040(tax_return: TaxReturn) -> Dict[str, str]:
 
     if tp.ssn:
         result[fields["your_ssn"]] = tp.ssn
+    if tp.spouse_ssn:
+        result[fields["spouse_ssn"]] = tp.spouse_ssn
 
     # Address
     if tp.address_line1:

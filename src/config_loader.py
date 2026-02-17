@@ -69,6 +69,7 @@ class DependentConfig:
     name: str = ""
     age: int = 0
     relationship: str = ""
+    ssn: Optional[str] = None
 
 
 @dataclass
@@ -92,6 +93,8 @@ class TaxProfileConfig:
     """Taxpayer profile loaded from YAML."""
     tax_year: int = 2025
     taxpayer_name: str = "Taxpayer"
+    taxpayer_ssn: Optional[str] = None
+    spouse_ssn: Optional[str] = None
     filing_status: str = "single"
     age: int = 30
     state_of_residence: str = "CA"  # Two-letter state code; CA = California (only state with calculated tax)
@@ -162,6 +165,7 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
                 name=d.get("name", ""),
                 age=d.get("age", 0),
                 relationship=d.get("relationship", ""),
+                ssn=d.get("ssn"),
             ))
 
     # Parse rental properties
@@ -188,9 +192,11 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         state_of_residence = "CA"
     is_ca_resident = state_of_residence == "CA"
 
-    return TaxProfileConfig(
+    config = TaxProfileConfig(
         tax_year=raw.get("tax_year", 2025),
         taxpayer_name=taxpayer.get("name", "Taxpayer"),
+        taxpayer_ssn=taxpayer.get("ssn"),
+        spouse_ssn=taxpayer.get("spouse_ssn"),
         filing_status=taxpayer.get("filing_status", "single"),
         age=taxpayer.get("age", 30),
         state_of_residence=state_of_residence,
@@ -220,3 +226,11 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         pal_carryover=float(raw.get("pal_carryover", 0.0)),
         rental_properties=rental_props,
     )
+
+    # Security warning if SSN fields are present
+    has_ssn = config.taxpayer_ssn or config.spouse_ssn or any(d.ssn for d in config.dependents)
+    if has_ssn:
+        print("\n  WARNING: Config file contains SSN data. "
+              "Ensure the config file is gitignored and not shared.")
+
+    return config

@@ -236,11 +236,13 @@ def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
         config.filing_status, FilingStatus.SINGLE
     )
     deps = [
-        Dependent(name=d.name, age=d.age, relationship=d.relationship)
+        Dependent(name=d.name, age=d.age, relationship=d.relationship, ssn=d.ssn)
         for d in config.dependents
     ]
     return TaxpayerInfo(
         name=config.taxpayer_name,
+        ssn=config.taxpayer_ssn,
+        spouse_ssn=config.spouse_ssn,
         filing_status=filing_status,
         age=config.age,
         state_of_residence=getattr(config, "state_of_residence", "CA"),

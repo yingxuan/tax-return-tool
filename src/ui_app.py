@@ -54,6 +54,8 @@ def config_from_form(form) -> TaxProfileConfig:
     return TaxProfileConfig(
         tax_year=_int(form, "tax_year", 2025),
         taxpayer_name=(form.get("taxpayer_name") or "Taxpayer").strip(),
+        taxpayer_ssn=(form.get("taxpayer_ssn") or "").strip() or None,
+        spouse_ssn=(form.get("spouse_ssn") or "").strip() or None,
         filing_status=filing_status,
         age=_int(form, "age", 30),
         state_of_residence=state_of_residence,
@@ -86,6 +88,12 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     """Override config with form values (for when YAML was uploaded)."""
     config.tax_year = _int(form, "tax_year", config.tax_year)
     config.taxpayer_name = (form.get("taxpayer_name") or config.taxpayer_name).strip()
+    tp_ssn = (form.get("taxpayer_ssn") or "").strip()
+    if tp_ssn:
+        config.taxpayer_ssn = tp_ssn
+    sp_ssn = (form.get("spouse_ssn") or "").strip()
+    if sp_ssn:
+        config.spouse_ssn = sp_ssn
     fs = form.get("filing_status")
     if fs:
         config.filing_status = fs.strip().lower()
@@ -502,13 +510,30 @@ INDEX_HTML = """
         </div>
         <div>
           <label>Filing Status</label>
-          <select name="filing_status" required>
+          <select name="filing_status" required id="filingStatus">
             <option value="single">Single</option>
             <option value="married_jointly">Married Filing Jointly</option>
             <option value="married_separately">Married Filing Separately</option>
             <option value="head_of_household">Head of Household</option>
           </select>
         </div>
+      </div>
+      <div class="field-row">
+        <div>
+          <label>Your name</label>
+          <input type="text" name="taxpayer_name" placeholder="First Last">
+        </div>
+        <div>
+          <label>SSN <span class="label-hint">- optional, for PDF forms</span></label>
+          <input type="text" name="taxpayer_ssn" placeholder="123-45-6789" maxlength="11" autocomplete="off">
+        </div>
+      </div>
+      <div class="field-row" id="spouseSsnRow" style="display:none">
+        <div>
+          <label>Spouse SSN <span class="label-hint">- optional, for PDF forms</span></label>
+          <input type="text" name="spouse_ssn" placeholder="987-65-4321" maxlength="11" autocomplete="off">
+        </div>
+        <div></div>
       </div>
       <div class="field-row">
         <div style="max-width:100px">
@@ -690,6 +715,16 @@ INDEX_HTML = """
     advancedSection.classList.toggle('open');
     advancedArrow.classList.toggle('open');
   });
+
+  /* Show/hide spouse SSN based on filing status */
+  const filingStatus = document.getElementById('filingStatus');
+  const spouseSsnRow = document.getElementById('spouseSsnRow');
+  function updateSpouseRow() {
+    const v = filingStatus.value;
+    spouseSsnRow.style.display = (v === 'married_jointly' || v === 'married_separately') ? '' : 'none';
+  }
+  filingStatus.addEventListener('change', updateSpouseRow);
+  updateSpouseRow();
 
   const droppedFiles = [];
   const ALLOWED_EXT = new Set(['.pdf','.csv','.xlsx','.xls','.jpg','.jpeg','.png','.tiff','.tif','.bmp']);
