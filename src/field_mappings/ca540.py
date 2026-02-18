@@ -1,6 +1,6 @@
 """Field mapping for California Form 540 (CA Resident Income Tax Return).
 
-Field names verified against 2025 FTB fillable PDF (2025-540.pdf).
+Field names verified against 2025 FTB fillable PDF (ca540.pdf).
 FTB uses flat naming: 540_form_XYYY where X=page, YYY=field sequence.
 
 Run `python tools/discover_fields.py pdf_templates/2024/ca540.pdf` to verify.
@@ -15,71 +15,145 @@ def _dollars(amount: float) -> str:
     return str(round(amount))
 
 
-# 2025 CA Form 540 actual field names from FTB fillable PDF.
-# Page 1: 540_form_1XXX (header, filing status, income)
-# Page 2: 540_form_2XXX (tax computation, credits)
-# Page 3: 540_form_3XXX (payments, refund/owed)
-# Page 4: 540_form_4XXX (additional info)
+# ------------------------------------------------------------------
+# 2025 CA Form 540 field names, verified against the actual PDF.
 #
-# Field-to-line mapping requires visual verification with labeled PDF.
-# Run: python tools/discover_fields.py pdf_templates/2024/ca540.pdf
-# The labeled PDF is at: output/ca540_labeled.pdf
+# Page 1 (1xxx): header, address, DOB, principal residence,
+#                filing status (radio 1036 RB), exemptions lines 7-9
+# Page 2 (2xxx): dependents (line 10), exemption amount (line 11),
+#                taxable income (lines 12-19), tax (lines 31-35),
+#                special credits (lines 40, 43-44)
+# Page 3 (3xxx): credits cont. (lines 45-48), other taxes (61-64),
+#                payments (71-78), use tax (91), ISR (92),
+#                overpaid/tax due (93-97)
+# Page 4 (4xxx): overpaid cont. (98-100), voluntary contributions
+# ------------------------------------------------------------------
 FIELD_NAMES_2025 = {
-    # Filing status checkbox
-    "filing_status": "540_form_1001 CB",
-
     # Page 1 - Header
-    "your_first_name": "540_form_1002",
-    "your_last_name": "540_form_1003",
-    "your_ssn": "540_form_1004",
-    "spouse_first_name": "540_form_1005",
-    "spouse_last_name": "540_form_1006",
-    "spouse_ssn": "540_form_1007",
-    "address": "540_form_1008",
-    "apt_no": "540_form_1009",
-    "city": "540_form_1010",
-    "state": "540_form_1011",
-    "zip": "540_form_1012",
+    "county": "540_form_1002",
+    "your_first_name": "540_form_1003",
+    "your_mi": "540_form_1004",
+    "your_last_name": "540_form_1005",
+    "your_suffix": "540_form_1006",
+    "your_ssn": "540_form_1007",
+    "spouse_first_name": "540_form_1008",
+    "spouse_mi": "540_form_1009",
+    "spouse_last_name": "540_form_1010",
+    "spouse_suffix": "540_form_1011",
+    "spouse_ssn": "540_form_1012",
 
-    # Page 1 - Income section (line numbers from CA 540 form)
-    # These field numbers need visual verification - update after checking labeled PDF
-    "line7_federal_agi": "540_form_1037",
-    "line8_ca_wages": "540_form_1038",
-    "line11_ca_subtractions": "540_form_1039",
-    "line12_ca_additions": "540_form_1041",
-    "line13_ca_agi": "540_form_1042",
-    "line14_deductions": "540_form_1043",
-    "line15_taxable_income": "540_form_1044",
+    # Page 1 - Additional info / mailing address
+    "additional_info": "540_form_1013",
+    "pba_code": "540_form_1014",
+    "address": "540_form_1015",
+    "apt_no": "540_form_1016",
+    "pmb": "540_form_1017",
+    "city": "540_form_1018",
+    "state": "540_form_1019",
+    "zip": "540_form_1020",
 
-    # Page 2 - Tax computation
-    "line16_tax": "540_form_2001",
-    "line17_exemption_credits": "540_form_2002",
-    "line18_subtotal": "540_form_2003",
-    "line19_special_credits": "540_form_2004",
-    "line20_subtotal2": "540_form_2005",
-    "line21_other_taxes": "540_form_2006",
-    "line22_mental_health_tax": "540_form_2007",
-    "line23_total_tax": "540_form_2008",
+    # Page 1 - DOB
+    "your_dob": "540_form_1024",
+    "spouse_dob": "540_form_1025",
 
-    # Page 2 - Payments
-    "line24_ca_withheld": "540_form_2009",
-    "line25_estimated_payments": "540_form_2010",
-    "line26_excess_sdi": "540_form_2011",
-    "line27_other_payments": "540_form_2012",
-    "line28_total_payments": "540_form_2013",
+    # Page 1 - Filing status (radio button group)
+    "filing_status": "540_form_1036 RB",
 
-    # Page 2 - Refund or owed
-    "line29_overpaid": "540_form_2014",
-    "line30_refund": "540_form_2015",
-    "line31_amount_owed": "540_form_2016",
+    # Page 1 - MFS spouse name field (line 3 area)
+    "mfs_spouse_name": "540_form_1037",
 
-    # Renter's credit
-    "renters_credit": "540_form_2017",
+    # Page 1 - Exemptions (lines 7-9)
+    "line7_personal_num": "540_form_1041",
+    "line7_personal_amt": "540_form_1042",
+    "line8_blind_num": "540_form_1043",
+    "line8_blind_amt": "540_form_1044",
+    "line9_senior_num": "540_form_1045",
+    "line9_senior_amt": "540_form_1046",
+
+    # Page 2 - Header (name/SSN repeated on each page)
+    "p2_name": "540_form_2001",
+    "p2_ssn": "540_form_2002",
+
+    # Page 2 - Dependents (line 10)
+    "dep1_first": "540_form_2003",
+    "dep1_last": "540_form_2004",
+    "dep1_ssn": "540_form_2005",
+    "dep1_relationship": "540_form_2006",
+    "dep2_first": "540_form_2007",
+    "dep2_last": "540_form_2008",
+    "dep2_ssn": "540_form_2009",
+    "dep2_relationship": "540_form_2010",
+    "dep3_first": "540_form_2011",
+    "dep3_last": "540_form_2012",
+    "dep3_ssn": "540_form_2013",
+    "dep3_relationship": "540_form_2014",
+    "line10_dep_num": "540_form_2015",
+    "line10_dep_amt": "540_form_2016",
+
+    # Line 11: total exemption amount
+    "line11_exemption_amount": "540_form_2017",
+
+    # Taxable Income section (lines 12-19)
+    "line12_state_wages": "540_form_2018",
+    "line13_federal_agi": "540_form_2019",
+    "line14_ca_subtractions": "540_form_2020",
+    "line15_subtotal": "540_form_2021",
+    "line16_ca_additions": "540_form_2022",
+    "line17_ca_agi": "540_form_2023",
+    "line18_deductions": "540_form_2024",
+    "line19_taxable_income": "540_form_2025",
+
+    # Tax section (lines 31-35)
+    "line31_tax": "540_form_2030",
+    "line32_exemption_credits": "540_form_2031",
+    "line33_subtotal": "540_form_2032",
+    # 2033/2034 CB = checkboxes for line 34 tax source
+    "line35_total": "540_form_2036",
+
+    # Special Credits
+    "line40_child_care_credit": "540_form_2037",
+
+    # Page 3 - Header
+    "p3_name": "540_form_2001",  # same field name, different page
+    "p3_ssn": "540_form_2002",
+
+    # Credits continuation (lines 45-48)
+    "line46_renters_credit": "540_form_3004",
+    "line47_total_credits": "540_form_3005",
+    "line48_net_tax": "540_form_3006",
+
+    # Other taxes (lines 61-64)
+    "line61_amt": "540_form_3007",
+    "line62_mental_health_tax": "540_form_3008",
+    "line63_other_taxes": "540_form_3009",
+    "line64_total_tax": "540_form_3010",
+
+    # Payments (lines 71-78)
+    "line71_ca_withheld": "540_form_3011",
+    "line72_estimated_payments": "540_form_3012",
+    "line78_total_payments": "540_form_3018",
+
+    # Overpaid/Tax Due (lines 93-97)
+    "line93_payments_balance": "540_form_3023",
+    "line95_after_isr": "540_form_3025",
+    "line97_overpaid": "540_form_3027",
+
+    # Page 4 - Overpaid continuation
+    "line99_refund": "540_form_4004",
+    "line100_amount_owed": "540_form_4005",
 }
 
 FIELD_NAMES = {
     2024: FIELD_NAMES_2025,  # FTB 2024 form may differ; verify
     2025: FIELD_NAMES_2025,
+}
+
+# Filing status radio button on_state values (from PDF widget inspection)
+_FILING_STATUS_RADIO = {
+    FilingStatus.SINGLE: "1",
+    FilingStatus.MARRIED_FILING_JOINTLY: "2",
+    FilingStatus.MARRIED_FILING_SEPARATELY: "3",
+    FilingStatus.HEAD_OF_HOUSEHOLD: "4",
 }
 
 
@@ -97,22 +171,30 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
     tp = tax_return.taxpayer
     fed = tax_return.federal_calculation
 
-    # Name
+    # --- Page 1: Header ---
+
+    # Your name
     name_parts = tp.name.split()
     if name_parts:
-        if "&" in tp.name:
-            ampersand_idx = name_parts.index("&")
-            result[fields["your_first_name"]] = " ".join(name_parts[:ampersand_idx])
+        if len(name_parts) > 1:
+            result[fields["your_first_name"]] = " ".join(name_parts[:-1])
             result[fields["your_last_name"]] = name_parts[-1]
-            if ampersand_idx + 1 < len(name_parts) - 1:
-                result[fields["spouse_first_name"]] = " ".join(name_parts[ampersand_idx + 1:-1])
-                result[fields["spouse_last_name"]] = name_parts[-1]
         else:
-            result[fields["your_first_name"]] = " ".join(name_parts[:-1]) if len(name_parts) > 1 else name_parts[0]
-            result[fields["your_last_name"]] = name_parts[-1] if len(name_parts) > 1 else ""
+            result[fields["your_first_name"]] = name_parts[0]
 
+    # Your SSN
     if tp.ssn:
         result[fields["your_ssn"]] = tp.ssn
+
+    # Spouse name & SSN
+    if tp.spouse_name:
+        sp_parts = tp.spouse_name.split()
+        if sp_parts:
+            if len(sp_parts) > 1:
+                result[fields["spouse_first_name"]] = " ".join(sp_parts[:-1])
+                result[fields["spouse_last_name"]] = sp_parts[-1]
+            else:
+                result[fields["spouse_first_name"]] = sp_parts[0]
     if tp.spouse_ssn:
         result[fields["spouse_ssn"]] = tp.spouse_ssn
 
@@ -129,63 +211,171 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
             if len(state_zip) > 1:
                 result[fields["zip"]] = state_zip[-1]
 
-    # Federal AGI flows into CA
+    # --- Page 1: Exemptions (lines 7-9) ---
+
+    # Line 7: Personal exemptions
+    is_joint = tp.filing_status == FilingStatus.MARRIED_FILING_JOINTLY
+    personal_count = 2 if is_joint else 1
+    result[fields["line7_personal_num"]] = str(personal_count)
+    result[fields["line7_personal_amt"]] = str(personal_count * 153)
+
+    # Line 10: Dependents & Line 11: Total exemption amount
+    # (handled on page 2 below)
+
+    # --- Page 2: Header ---
+    header_name = tp.name
+    if tp.spouse_name and is_joint:
+        header_name = f"{tp.name} & {tp.spouse_name}"
+    result[fields["p2_name"]] = header_name
+    if tp.ssn:
+        result[fields["p2_ssn"]] = tp.ssn
+
+    # --- Page 2: Dependents (line 10) ---
+    deps = tp.dependents or []
+    dep_fields = [
+        ("dep1_first", "dep1_last", "dep1_ssn", "dep1_relationship"),
+        ("dep2_first", "dep2_last", "dep2_ssn", "dep2_relationship"),
+        ("dep3_first", "dep3_last", "dep3_ssn", "dep3_relationship"),
+    ]
+    for i, dep in enumerate(deps[:3]):
+        first_key, last_key, ssn_key, rel_key = dep_fields[i]
+        dep_name_parts = dep.name.split()
+        if len(dep_name_parts) > 1:
+            result[fields[first_key]] = " ".join(dep_name_parts[:-1])
+            result[fields[last_key]] = dep_name_parts[-1]
+        else:
+            result[fields[first_key]] = dep.name
+        if dep.ssn:
+            result[fields[ssn_key]] = dep.ssn
+        result[fields[rel_key]] = dep.relationship
+
+    num_deps = len(deps)
+    if num_deps > 0:
+        result[fields["line10_dep_num"]] = str(num_deps)
+        result[fields["line10_dep_amt"]] = str(num_deps * 475)
+
+    # Line 11: Total exemption amount
+    total_exemption = personal_count * 153 + num_deps * 475
+    result[fields["line11_exemption_amount"]] = str(total_exemption)
+
+    # --- Page 2: Taxable Income (lines 12-19) ---
+
+    # Line 13: Federal AGI
     if fed:
-        result[fields["line7_federal_agi"]] = _dollars(fed.adjusted_gross_income)
+        result[fields["line13_federal_agi"]] = _dollars(fed.adjusted_gross_income)
 
-    # CA AGI (may differ from federal due to CA adjustments)
-    result[fields["line13_ca_agi"]] = _dollars(ca.adjusted_gross_income)
-
-    # CA adjustments (US Treasury interest subtraction, etc.)
+    # CA adjustments (lines 14, 16)
     if fed and ca.adjusted_gross_income != fed.adjusted_gross_income:
         ca_adj = ca.adjusted_gross_income - fed.adjusted_gross_income
         if ca_adj < 0:
-            result[fields["line11_ca_subtractions"]] = _dollars(abs(ca_adj))
+            result[fields["line14_ca_subtractions"]] = _dollars(abs(ca_adj))
+            # Line 15 = Line 13 - Line 14
+            result[fields["line15_subtotal"]] = _dollars(
+                fed.adjusted_gross_income - abs(ca_adj)
+            )
         else:
-            result[fields["line12_ca_additions"]] = _dollars(ca_adj)
+            result[fields["line16_ca_additions"]] = _dollars(ca_adj)
+            # Line 15 = Line 13 (no subtraction)
+            result[fields["line15_subtotal"]] = _dollars(
+                fed.adjusted_gross_income
+            )
+    elif fed:
+        result[fields["line15_subtotal"]] = _dollars(fed.adjusted_gross_income)
 
-    # Deductions and taxable income
-    result[fields["line14_deductions"]] = _dollars(ca.deductions)
-    result[fields["line15_taxable_income"]] = _dollars(ca.taxable_income)
+    # Line 17: CA AGI
+    result[fields["line17_ca_agi"]] = _dollars(ca.adjusted_gross_income)
 
-    # Tax
-    result[fields["line16_tax"]] = _dollars(ca.tax_before_credits)
+    # Line 18: Deductions (itemized or standard)
+    result[fields["line18_deductions"]] = _dollars(ca.deductions)
 
-    # Exemption credits
+    # Line 19: Taxable income
+    result[fields["line19_taxable_income"]] = _dollars(ca.taxable_income)
+
+    # --- Page 2: Tax section (lines 31-35) ---
+
+    # Line 31: Base tax from tax table (excluding mental health surcharge)
+    base_tax = ca.tax_before_credits - ca.ca_mental_health_tax
+    result[fields["line31_tax"]] = _dollars(base_tax)
+
+    # Line 32: Exemption credits
     if ca.ca_exemption_credit > 0:
-        result[fields["line17_exemption_credits"]] = _dollars(ca.ca_exemption_credit)
+        result[fields["line32_exemption_credits"]] = _dollars(
+            ca.ca_exemption_credit
+        )
 
-    # Mental Health Tax (1% surcharge on income > $1M)
+    # Line 33: Line 31 - Line 32
+    line33 = max(0, base_tax - ca.ca_exemption_credit)
+    result[fields["line33_subtotal"]] = _dollars(line33)
+
+    # Line 35: same as line 33 if no line 34
+    result[fields["line35_total"]] = _dollars(line33)
+
+    # --- Page 3: Credits (lines 46-48) ---
+
+    # Line 46: Renter's credit
+    if ca.ca_renters_credit > 0:
+        result[fields["line46_renters_credit"]] = _dollars(
+            ca.ca_renters_credit
+        )
+
+    # Line 47: Total credits (renters + any other)
+    total_credits = ca.ca_renters_credit
+    if total_credits > 0:
+        result[fields["line47_total_credits"]] = _dollars(total_credits)
+
+    # Line 48: Line 35 - Line 47
+    line48 = max(0, line33 - total_credits)
+    result[fields["line48_net_tax"]] = _dollars(line48)
+
+    # --- Page 3: Other Taxes (lines 61-64) ---
+
+    # Line 62: Mental Health / Behavioral Health Tax (1% on income > $1M)
     if ca.ca_mental_health_tax > 0:
-        result[fields["line22_mental_health_tax"]] = _dollars(ca.ca_mental_health_tax)
+        result[fields["line62_mental_health_tax"]] = _dollars(
+            ca.ca_mental_health_tax
+        )
 
-    # Total tax
-    result[fields["line23_total_tax"]] = _dollars(ca.tax_after_credits)
+    # Line 64: Total tax = Line 48 + Line 61 + Line 62 + Line 63
+    total_tax = line48 + ca.ca_mental_health_tax
+    result[fields["line64_total_tax"]] = _dollars(total_tax)
 
-    # Payments
-    result[fields["line24_ca_withheld"]] = _dollars(ca.tax_withheld)
+    # --- Page 3: Payments (lines 71-78) ---
+
+    # Line 71: CA income tax withheld
+    result[fields["line71_ca_withheld"]] = _dollars(ca.tax_withheld)
+
+    # Line 72: Estimated payments
     if ca.estimated_payments > 0:
-        result[fields["line25_estimated_payments"]] = _dollars(ca.estimated_payments)
+        result[fields["line72_estimated_payments"]] = _dollars(
+            ca.estimated_payments
+        )
 
-    # Excess SDI
-    if ca.ca_sdi > 0:
-        result[fields["line26_excess_sdi"]] = _dollars(ca.ca_sdi)
-
+    # Line 78: Total payments
     total_payments = ca.total_payments
     if ca.ca_sdi > 0:
         total_payments += ca.ca_sdi
-    result[fields["line28_total_payments"]] = _dollars(total_payments)
+    result[fields["line78_total_payments"]] = _dollars(total_payments)
 
-    # Renter's credit
-    if ca.ca_renters_credit > 0:
-        result[fields["renters_credit"]] = _dollars(ca.ca_renters_credit)
+    # --- Page 3: Overpaid / Tax Due (lines 93-97) ---
+
+    # Line 93: Payments balance (line 78 - line 91 use tax)
+    result[fields["line93_payments_balance"]] = _dollars(total_payments)
+
+    # Line 95: After ISR penalty (= line 93 if no ISR)
+    result[fields["line95_after_isr"]] = _dollars(total_payments)
 
     # Refund or owed
     refund_or_owed = ca.refund_or_owed
+    if ca.ca_sdi > 0:
+        refund_or_owed += ca.ca_sdi
+
     if refund_or_owed > 0:
-        result[fields["line29_overpaid"]] = _dollars(refund_or_owed)
-        result[fields["line30_refund"]] = _dollars(refund_or_owed)
+        # Line 97: Overpaid
+        result[fields["line97_overpaid"]] = _dollars(refund_or_owed)
+        # Line 99: Refund
+        result[fields["line99_refund"]] = _dollars(refund_or_owed)
     elif refund_or_owed < 0:
-        result[fields["line31_amount_owed"]] = _dollars(abs(refund_or_owed))
+        # Line 100: Amount owed
+        result[fields["line100_amount_owed"]] = _dollars(abs(refund_or_owed))
 
     return result

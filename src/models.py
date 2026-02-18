@@ -352,6 +352,7 @@ class TaxpayerInfo:
     name: str
     ssn: Optional[str] = None
     spouse_ssn: Optional[str] = None
+    spouse_name: Optional[str] = None
     filing_status: FilingStatus = FilingStatus.SINGLE
     age: int = 30
     is_blind: bool = False

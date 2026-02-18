@@ -95,6 +95,7 @@ class TaxProfileConfig:
     taxpayer_name: str = "Taxpayer"
     taxpayer_ssn: Optional[str] = None
     spouse_ssn: Optional[str] = None
+    spouse_name: Optional[str] = None
     filing_status: str = "single"
     age: int = 30
     state_of_residence: str = "CA"  # Two-letter state code; CA = California (only state with calculated tax)
@@ -197,6 +198,7 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         taxpayer_name=taxpayer.get("name", "Taxpayer"),
         taxpayer_ssn=taxpayer.get("ssn"),
         spouse_ssn=taxpayer.get("spouse_ssn"),
+        spouse_name=taxpayer.get("spouse_name"),
         filing_status=taxpayer.get("filing_status", "single"),
         age=taxpayer.get("age", 30),
         state_of_residence=state_of_residence,

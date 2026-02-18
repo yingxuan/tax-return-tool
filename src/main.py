@@ -243,6 +243,7 @@ def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
         name=config.taxpayer_name,
         ssn=config.taxpayer_ssn,
         spouse_ssn=config.spouse_ssn,
+        spouse_name=config.spouse_name,
         filing_status=filing_status,
         age=config.age,
         state_of_residence=getattr(config, "state_of_residence", "CA"),
@@ -849,7 +850,8 @@ def run_demo():
     # Taxpayer: Married Filing Jointly, 2 kids
     # -------------------------------------------------------------------
     taxpayer = TaxpayerInfo(
-        name="John & Jane Doe",
+        name="John Doe",
+        spouse_name="Jane Doe",
         filing_status=FilingStatus.MARRIED_FILING_JOINTLY,
         age=42,
         state_of_residence="CA",

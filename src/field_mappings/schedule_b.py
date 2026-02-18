@@ -1,6 +1,13 @@
 """Field mapping for IRS Schedule B (Interest and Ordinary Dividends).
 
-Field names verified against 2024 IRS fillable PDF (f1040sb.pdf).
+Field names verified against 2025 IRS fillable PDF (sb.pdf).
+
+2025 changes from 2024:
+  - f1_01/f1_02 are now name/SSN header fields (new)
+  - Interest payers shifted: start at f1_03 (14 rows, f1_03-f1_30)
+  - Note: f1_03 is under Line1_ReadOrder subform, all others under Page1
+  - Dividend payers shifted: start at f1_36 (14 rows, f1_36-f1_63)
+  - Line totals: Line 1 subtotal=f1_31, Line 4=f1_35, Line 6=f1_64
 """
 
 from typing import Dict
@@ -12,57 +19,60 @@ def _dollars(amount: float) -> str:
     return str(round(amount))
 
 
-# 2024 Schedule B actual field names from IRS fillable PDF.
-# Verified via: python tools/discover_fields.py pdf_templates/2024/sb.pdf
-#
-# Part I (Interest): payer/amount pairs in f1_01..f1_33
-# Part II (Dividends): payer/amount pairs in f1_18..f1_33 area
-# The field numbering is sequential.
-FIELD_NAMES_2024 = {
-    # Part I - Interest payers (name + amount pairs)
-    "int_payer_1": "topmostSubform[0].Page1[0].f1_01[0]",
-    "int_amount_1": "topmostSubform[0].Page1[0].f1_02[0]",
-    "int_payer_2": "topmostSubform[0].Page1[0].f1_03[0]",
-    "int_amount_2": "topmostSubform[0].Page1[0].f1_04[0]",
-    "int_payer_3": "topmostSubform[0].Page1[0].f1_05[0]",
-    "int_amount_3": "topmostSubform[0].Page1[0].f1_06[0]",
-    "int_payer_4": "topmostSubform[0].Page1[0].f1_07[0]",
-    "int_amount_4": "topmostSubform[0].Page1[0].f1_08[0]",
-    "int_payer_5": "topmostSubform[0].Page1[0].f1_09[0]",
-    "int_amount_5": "topmostSubform[0].Page1[0].f1_10[0]",
-    "int_payer_6": "topmostSubform[0].Page1[0].f1_11[0]",
-    "int_amount_6": "topmostSubform[0].Page1[0].f1_12[0]",
-    "int_payer_7": "topmostSubform[0].Page1[0].f1_13[0]",
-    "int_amount_7": "topmostSubform[0].Page1[0].f1_14[0]",
+_P1 = "topmostSubform[0].Page1[0]"
 
-    # Line 1 subtotal (read-order field)
-    "line1_subtotal": "topmostSubform[0].Page1[0].Line1_ReadOrder[0].f1_03[0]",
+# 2025 Schedule B actual field names from IRS fillable PDF.
+# Verified via: python tools/discover_fields.py pdf_templates/2024/sb.pdf
+FIELD_NAMES_2025 = {
+    # Header (new in 2025)
+    "name": f"{_P1}.f1_01[0]",
+    "ssn": f"{_P1}.f1_02[0]",
+
+    # Part I - Interest payers (name + amount pairs)
+    # Note: payer 1 name is under Line1_ReadOrder subform
+    "int_payer_1": f"{_P1}.Line1_ReadOrder[0].f1_03[0]",
+    "int_amount_1": f"{_P1}.f1_04[0]",
+    "int_payer_2": f"{_P1}.f1_05[0]",
+    "int_amount_2": f"{_P1}.f1_06[0]",
+    "int_payer_3": f"{_P1}.f1_07[0]",
+    "int_amount_3": f"{_P1}.f1_08[0]",
+    "int_payer_4": f"{_P1}.f1_09[0]",
+    "int_amount_4": f"{_P1}.f1_10[0]",
+    "int_payer_5": f"{_P1}.f1_11[0]",
+    "int_amount_5": f"{_P1}.f1_12[0]",
+    "int_payer_6": f"{_P1}.f1_13[0]",
+    "int_amount_6": f"{_P1}.f1_14[0]",
+    "int_payer_7": f"{_P1}.f1_15[0]",
+    "int_amount_7": f"{_P1}.f1_16[0]",
+
+    # Line 1 subtotal
+    "line1_subtotal": f"{_P1}.f1_31[0]",
     # Line 4 total interest
-    "line4_total_interest": "topmostSubform[0].Page1[0].ReadOrderControl[0].f1_34[0]",
+    "line4_total_interest": f"{_P1}.f1_35[0]",
 
     # Part II - Dividend payers (name + amount pairs)
-    "div_payer_1": "topmostSubform[0].Page1[0].f1_15[0]",
-    "div_amount_1": "topmostSubform[0].Page1[0].f1_16[0]",
-    "div_payer_2": "topmostSubform[0].Page1[0].f1_17[0]",
-    "div_amount_2": "topmostSubform[0].Page1[0].f1_18[0]",
-    "div_payer_3": "topmostSubform[0].Page1[0].f1_19[0]",
-    "div_amount_3": "topmostSubform[0].Page1[0].f1_20[0]",
-    "div_payer_4": "topmostSubform[0].Page1[0].f1_21[0]",
-    "div_amount_4": "topmostSubform[0].Page1[0].f1_22[0]",
-    "div_payer_5": "topmostSubform[0].Page1[0].f1_23[0]",
-    "div_amount_5": "topmostSubform[0].Page1[0].f1_24[0]",
-    "div_payer_6": "topmostSubform[0].Page1[0].f1_25[0]",
-    "div_amount_6": "topmostSubform[0].Page1[0].f1_26[0]",
-    "div_payer_7": "topmostSubform[0].Page1[0].f1_27[0]",
-    "div_amount_7": "topmostSubform[0].Page1[0].f1_28[0]",
+    "div_payer_1": f"{_P1}.f1_36[0]",
+    "div_amount_1": f"{_P1}.f1_37[0]",
+    "div_payer_2": f"{_P1}.f1_38[0]",
+    "div_amount_2": f"{_P1}.f1_39[0]",
+    "div_payer_3": f"{_P1}.f1_40[0]",
+    "div_amount_3": f"{_P1}.f1_41[0]",
+    "div_payer_4": f"{_P1}.f1_42[0]",
+    "div_amount_4": f"{_P1}.f1_43[0]",
+    "div_payer_5": f"{_P1}.f1_44[0]",
+    "div_amount_5": f"{_P1}.f1_45[0]",
+    "div_payer_6": f"{_P1}.f1_46[0]",
+    "div_amount_6": f"{_P1}.f1_47[0]",
+    "div_payer_7": f"{_P1}.f1_48[0]",
+    "div_amount_7": f"{_P1}.f1_49[0]",
 
     # Line 6 total dividends
-    "line6_total_dividends": "topmostSubform[0].Page1[0].f1_33[0]",
+    "line6_total_dividends": f"{_P1}.f1_64[0]",
 }
 
 FIELD_NAMES = {
-    2024: FIELD_NAMES_2024,
-    2025: FIELD_NAMES_2024,
+    2024: FIELD_NAMES_2025,
+    2025: FIELD_NAMES_2025,
 }
 
 
@@ -75,8 +85,13 @@ def map_schedule_b(tax_return: TaxReturn) -> Dict[str, str]:
         return {}
 
     year = tax_return.tax_year
-    fields = FIELD_NAMES.get(year, FIELD_NAMES_2024)
+    fields = FIELD_NAMES.get(year, FIELD_NAMES_2025)
     result = {}
+
+    # Name and SSN
+    result[fields["name"]] = tax_return.taxpayer.name
+    if tax_return.taxpayer.ssn:
+        result[fields["ssn"]] = tax_return.taxpayer.ssn
 
     # Part I - Interest payers
     int_forms = tax_return.form_1099_int

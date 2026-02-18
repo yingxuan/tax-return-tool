@@ -4,7 +4,8 @@
 
 tax_year: 2025
 taxpayer:
-  name: "John & Jane Doe"
+  name: "John Doe"
+  spouse_name: "Jane Doe"
   # ssn: "123-45-6789"           # Your SSN (keep this file gitignored!)
   # spouse_ssn: "987-65-4321"    # Spouse SSN (MFJ only)
   filing_status: married_jointly  # single, married_jointly, married_separately, head_of_household

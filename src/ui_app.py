@@ -56,6 +56,7 @@ def config_from_form(form) -> TaxProfileConfig:
         taxpayer_name=(form.get("taxpayer_name") or "Taxpayer").strip(),
         taxpayer_ssn=(form.get("taxpayer_ssn") or "").strip() or None,
         spouse_ssn=(form.get("spouse_ssn") or "").strip() or None,
+        spouse_name=(form.get("spouse_name") or "").strip() or None,
         filing_status=filing_status,
         age=_int(form, "age", 30),
         state_of_residence=state_of_residence,
@@ -94,6 +95,9 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     sp_ssn = (form.get("spouse_ssn") or "").strip()
     if sp_ssn:
         config.spouse_ssn = sp_ssn
+    sp_name = (form.get("spouse_name") or "").strip()
+    if sp_name:
+        config.spouse_name = sp_name
     fs = form.get("filing_status")
     if fs:
         config.filing_status = fs.strip().lower()
@@ -530,10 +534,13 @@ INDEX_HTML = """
       </div>
       <div class="field-row" id="spouseSsnRow" style="display:none">
         <div>
+          <label>Spouse name</label>
+          <input type="text" name="spouse_name" placeholder="First Last">
+        </div>
+        <div>
           <label>Spouse SSN <span class="label-hint">- optional, for PDF forms</span></label>
           <input type="text" name="spouse_ssn" placeholder="987-65-4321" maxlength="11" autocomplete="off">
         </div>
-        <div></div>
       </div>
       <div class="field-row">
         <div style="max-width:100px">
