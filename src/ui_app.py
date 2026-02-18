@@ -5,20 +5,30 @@ process_tax_documents / process_tax_return / generate_full_report without
 changing core logic.
 """
 
+import io
 import os
 import re
 import shutil
 import tempfile
+import time
+import uuid
+import zipfile
 from pathlib import Path
 
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template_string, jsonify, send_file
 
 # Import existing pipeline; no changes to these modules
 from .config_loader import load_config, TaxProfileConfig, US_STATES
+from .form_filler import fill_form, get_template_path, _auto_select_forms as auto_select_forms
+from .field_mappings import get_mapper
 from .main import process_tax_documents, process_tax_return
 from .report_generator import generate_full_report, generate_full_report_html
 
 app = Flask(__name__)
+
+# In-memory cache for TaxReturn objects (keyed by token)
+_tax_return_cache = {}  # {token: (tax_return, timestamp)}
+_CACHE_TTL = 600  # 10 minutes
 
 
 def _float(form, key: str, default: float = 0.0) -> float:
@@ -273,7 +283,31 @@ def run():
         report = generate_full_report(tax_return)
         report_html = generate_full_report_html(tax_return)
         info = _detect_missing(tax_return)
-        return jsonify({"report": report, "report_html": report_html, **info})
+
+        # Cache TaxReturn and determine available PDF forms
+        token = uuid.uuid4().hex
+        _tax_return_cache[token] = (tax_return, time.time())
+        # Evict expired entries
+        now = time.time()
+        expired = [k for k, (_, ts) in _tax_return_cache.items() if now - ts > _CACHE_TTL]
+        for k in expired:
+            del _tax_return_cache[k]
+
+        available_forms = []
+        for form_name in auto_select_forms(tax_return):
+            try:
+                get_template_path(form_name, tax_return.tax_year)
+                available_forms.append(form_name)
+            except FileNotFoundError:
+                pass
+
+        return jsonify({
+            "report": report,
+            "report_html": report_html,
+            "pdf_token": token,
+            "available_forms": available_forms,
+            **info,
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -288,6 +322,47 @@ def run():
                 shutil.rmtree(doc_temp_dir)
             except OSError:
                 pass
+
+
+@app.route("/download-forms")
+def download_forms():
+    """Generate filled PDF forms and return as a ZIP archive."""
+    token = request.args.get("token", "")
+    entry = _tax_return_cache.get(token)
+    if not entry:
+        return jsonify({"error": "Session expired or invalid. Please re-calculate."}), 404
+
+    tax_return, ts = entry
+    if time.time() - ts > _CACHE_TTL:
+        del _tax_return_cache[token]
+        return jsonify({"error": "Session expired. Please re-calculate."}), 404
+
+    forms = auto_select_forms(tax_return)
+    bio = io.BytesIO()
+    count = 0
+
+    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
+        for form_name in forms:
+            try:
+                get_template_path(form_name, tax_return.tax_year)
+            except FileNotFoundError:
+                continue
+            writer = fill_form(form_name, tax_return)
+            if writer is None:
+                continue
+            _, template_file = get_mapper(form_name)
+            pdf_buf = io.BytesIO()
+            writer.write(pdf_buf)
+            pdf_buf.seek(0)
+            zf.writestr(f"filled_{template_file}", pdf_buf.read())
+            count += 1
+
+    if count == 0:
+        return jsonify({"error": "No PDF templates found. Place fillable PDFs in pdf_templates/<year>/."}), 404
+
+    bio.seek(0)
+    year = tax_return.tax_year
+    return send_file(bio, mimetype="application/zip", as_attachment=True, download_name=f"tax_forms_{year}.zip")
 
 
 # Inline HTML template (single page: form, drop zone, report area)
@@ -427,6 +502,11 @@ INDEX_HTML = """
                              color: #475569; cursor: pointer; transition: all 0.15s; }
     .report-toolbar button:hover { background: #f1f5f9; border-color: #94a3b8; }
     .report-toolbar button.copied { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+    .report-toolbar .dl-btn { background: linear-gradient(135deg, #16a34a, #22c55e); color: #fff;
+                              border-color: #16a34a; font-weight: 600; }
+    .report-toolbar .dl-btn:hover { background: linear-gradient(135deg, #15803d, #16a34a); border-color: #15803d; }
+    .report-toolbar .dl-btn:disabled { opacity: 0.5; cursor: not-allowed; background: #e2e8f0; color: #94a3b8;
+                                       border-color: #cbd5e1; }
     .report-placeholder { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 1.25rem;
                          color: #1e40af; font-size: 0.95rem; line-height: 1.5; }
     .tax-report { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.92rem; color: #1e293b; }
@@ -889,6 +969,8 @@ INDEX_HTML = """
   const step3Hint = document.getElementById('step3Hint');
   let hasRun = false;
   let plainTextReport = '';
+  let pdfToken = '';
+  let availableForms = [];
 
   function showStep3(data) {
     const missing = data.missing || [];
@@ -1004,8 +1086,22 @@ INDEX_HTML = """
     printBtn.type = 'button';
     printBtn.innerHTML = '\\u{1F5A8} Print';
     printBtn.addEventListener('click', () => window.print());
+    const dlBtn = document.createElement('button');
+    dlBtn.type = 'button';
+    dlBtn.className = 'dl-btn';
+    if (availableForms.length > 0) {
+      dlBtn.innerHTML = '\\u{1F4E5} Download PDF Forms';
+      dlBtn.addEventListener('click', () => {
+        window.location.href = '/download-forms?token=' + pdfToken;
+      });
+    } else {
+      dlBtn.innerHTML = '\\u{1F4E5} PDF Forms (no templates)';
+      dlBtn.disabled = true;
+      dlBtn.title = 'Place fillable PDF templates in pdf_templates/<year>/ to enable';
+    }
     toolbar.appendChild(copyBtn);
     toolbar.appendChild(printBtn);
+    toolbar.appendChild(dlBtn);
     report.insertBefore(toolbar, report.firstChild);
   }
 
@@ -1037,6 +1133,8 @@ INDEX_HTML = """
       } else {
         var missing = data.missing || [];
         plainTextReport = data.report || '';
+        pdfToken = data.pdf_token || '';
+        availableForms = data.available_forms || [];
         var isFirstRun = !hasRun;
         showStep3(data);
         /* First run with missing fields: show only Step 3, hide report */
