@@ -30,7 +30,7 @@ def _dollars(amount: float) -> str:
 # ------------------------------------------------------------------
 FIELD_NAMES_2025 = {
     # Page 1 - Header
-    "county": "540_form_1002",
+    "county_header": "540_form_1002",
     "your_first_name": "540_form_1003",
     "your_mi": "540_form_1004",
     "your_last_name": "540_form_1005",
@@ -52,9 +52,27 @@ FIELD_NAMES_2025 = {
     "state": "540_form_1019",
     "zip": "540_form_1020",
 
+    # Page 1 - Foreign address (only used for foreign filers)
+    "foreign_country": "540_form_1021",
+    "foreign_province": "540_form_1022",
+    "foreign_postal_code": "540_form_1023",
+
     # Page 1 - DOB
     "your_dob": "540_form_1024",
     "spouse_dob": "540_form_1025",
+
+    # Page 1 - Prior name (if name changed)
+    "your_prior_name": "540_form_1026",
+    "spouse_prior_name": "540_form_1027",
+
+    # Page 1 - Principal Residence section
+    "county_at_filing": "540_form_1028",  # "Enter your county at time of filing"
+    "same_as_mailing_cb": "540_form_1029 CB",  # Check if principal = mailing
+    "principal_street": "540_form_1030",  # Principal residence street (if different)
+    "principal_apt": "540_form_1031",  # Principal residence apt/ste
+    "principal_city": "540_form_1032",  # Principal residence city
+    "principal_state": "540_form_1033",  # Principal residence state
+    "principal_zip": "540_form_1034",  # Principal residence ZIP
 
     # Page 1 - Filing status (radio button group)
     "filing_status": "540_form_1036 RB",
@@ -148,12 +166,13 @@ FIELD_NAMES = {
     2025: FIELD_NAMES_2025,
 }
 
-# Filing status radio button on_state values (from PDF widget inspection)
+# Filing status radio button values (from PDF widget /AP /N inspection).
+# The PDF uses the full descriptive label as the appearance state name.
 _FILING_STATUS_RADIO = {
-    FilingStatus.SINGLE: "1",
-    FilingStatus.MARRIED_FILING_JOINTLY: "2",
-    FilingStatus.MARRIED_FILING_SEPARATELY: "3",
-    FilingStatus.HEAD_OF_HOUSEHOLD: "4",
+    FilingStatus.SINGLE: "/1 . Single.",
+    FilingStatus.MARRIED_FILING_JOINTLY: "/2 . Married/R D P filing jointly (even if only one spouse / R D P had income). See instructions.",
+    FilingStatus.MARRIED_FILING_SEPARATELY: "/3 . Married or R D P filing separately.",
+    FilingStatus.HEAD_OF_HOUSEHOLD: "/4 . Head of household (with qualifying person). See instructions.",
 }
 
 
@@ -182,9 +201,9 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
         else:
             result[fields["your_first_name"]] = name_parts[0]
 
-    # Your SSN
+    # Your SSN (normalized: no dashes for e-file consistency)
     if tp.ssn:
-        result[fields["your_ssn"]] = tp.ssn
+        result[fields["your_ssn"]] = tp.ssn.replace("-", "")
 
     # Spouse name & SSN
     if tp.spouse_name:
@@ -196,7 +215,7 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
             else:
                 result[fields["spouse_first_name"]] = sp_parts[0]
     if tp.spouse_ssn:
-        result[fields["spouse_ssn"]] = tp.spouse_ssn
+        result[fields["spouse_ssn"]] = tp.spouse_ssn.replace("-", "")
 
     # Address
     if tp.address_line1:
@@ -210,6 +229,35 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
                 result[fields["state"]] = state_zip[0]
             if len(state_zip) > 1:
                 result[fields["zip"]] = state_zip[-1]
+
+    # County (header and principal residence "at time of filing")
+    if tp.county:
+        result[fields["county_header"]] = tp.county
+        result[fields["county_at_filing"]] = tp.county
+
+    # DOB
+    if tp.date_of_birth:
+        result[fields["your_dob"]] = tp.date_of_birth
+    if tp.spouse_dob:
+        result[fields["spouse_dob"]] = tp.spouse_dob
+
+    # Principal residence: check "same as mailing" box (most filers).
+    # When checked, principal address fields must be left blank per form instructions.
+    result[fields["same_as_mailing_cb"]] = "/1"
+    result[fields["principal_street"]] = ""
+    result[fields["principal_apt"]] = ""
+    result[fields["principal_city"]] = ""
+    result[fields["principal_state"]] = ""
+    result[fields["principal_zip"]] = ""
+
+    # --- Page 1: Filing status ---
+    fs_value = _FILING_STATUS_RADIO.get(tp.filing_status)
+    if fs_value:
+        result[fields["filing_status"]] = fs_value
+
+    # MFS: enter spouse name
+    if tp.filing_status == FilingStatus.MARRIED_FILING_SEPARATELY and tp.spouse_name:
+        result[fields["mfs_spouse_name"]] = tp.spouse_name
 
     # --- Page 1: Exemptions (lines 7-9) ---
 
@@ -228,7 +276,7 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
         header_name = f"{tp.name} & {tp.spouse_name}"
     result[fields["p2_name"]] = header_name
     if tp.ssn:
-        result[fields["p2_ssn"]] = tp.ssn
+        result[fields["p2_ssn"]] = tp.ssn.replace("-", "")
 
     # --- Page 2: Dependents (line 10) ---
     deps = tp.dependents or []
@@ -246,7 +294,7 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
         else:
             result[fields[first_key]] = dep.name
         if dep.ssn:
-            result[fields[ssn_key]] = dep.ssn
+            result[fields[ssn_key]] = dep.ssn.strip().replace("-", "")
         result[fields[rel_key]] = dep.relationship
 
     num_deps = len(deps)
@@ -259,6 +307,11 @@ def map_ca540(tax_return: TaxReturn) -> Dict[str, str]:
     result[fields["line11_exemption_amount"]] = str(total_exemption)
 
     # --- Page 2: Taxable Income (lines 12-19) ---
+
+    # Line 12: State wages (sum of W-2 Box 16 state wages)
+    state_wages = sum(w.state_wages for w in tax_return.w2_forms)
+    if state_wages > 0:
+        result[fields["line12_state_wages"]] = _dollars(state_wages)
 
     # Line 13: Federal AGI
     if fed:

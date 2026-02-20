@@ -88,10 +88,10 @@ def map_schedule_b(tax_return: TaxReturn) -> Dict[str, str]:
     fields = FIELD_NAMES.get(year, FIELD_NAMES_2025)
     result = {}
 
-    # Name and SSN
+    # Name and SSN (IRS: no dashes)
     result[fields["name"]] = tax_return.taxpayer.name
     if tax_return.taxpayer.ssn:
-        result[fields["ssn"]] = tax_return.taxpayer.ssn
+        result[fields["ssn"]] = tax_return.taxpayer.ssn.replace("-", "")
 
     # Part I - Interest payers
     int_forms = tax_return.form_1099_int

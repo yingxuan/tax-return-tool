@@ -114,23 +114,45 @@ FIELD_NAMES_2025 = {
     "state": f"{_ADDR}.f1_23[0]",
     "zip": f"{_ADDR}.f1_24[0]",
 
-    # Dependents (2025 column layout: Row1=first, Row2=last, Row3=SSN, Row4=rel)
+    # Main home in U.S. checkbox (c1_5)
+    "main_home_us": f"{_P1}.c1_5[0]",
+
+    # Digital assets Yes/No (c1_10)
+    "digital_assets_yes": f"{_P1}.c1_10[0]",
+    "digital_assets_no": f"{_P1}.c1_10[1]",
+
+    # Dependents (2025 row layout: each row = one dependent with first, last, SSN, rel)
+    # Row 1 (y=471): dep1
     "dep1_first": f"{_DEP}.Row1[0].f1_31[0]",
-    "dep1_last": f"{_DEP}.Row2[0].f1_35[0]",
-    "dep1_ssn": f"{_DEP}.Row3[0].f1_39[0]",
-    "dep1_relationship": f"{_DEP}.Row4[0].f1_43[0]",
-    "dep2_first": f"{_DEP}.Row1[0].f1_32[0]",
+    "dep1_last": f"{_DEP}.Row1[0].f1_32[0]",
+    "dep1_ssn": f"{_DEP}.Row1[0].f1_33[0]",
+    "dep1_relationship": f"{_DEP}.Row1[0].f1_34[0]",
+    # Row 2 (y=459): dep2
+    "dep2_first": f"{_DEP}.Row2[0].f1_35[0]",
     "dep2_last": f"{_DEP}.Row2[0].f1_36[0]",
-    "dep2_ssn": f"{_DEP}.Row3[0].f1_40[0]",
-    "dep2_relationship": f"{_DEP}.Row4[0].f1_44[0]",
-    "dep3_first": f"{_DEP}.Row1[0].f1_33[0]",
-    "dep3_last": f"{_DEP}.Row2[0].f1_37[0]",
+    "dep2_ssn": f"{_DEP}.Row2[0].f1_37[0]",
+    "dep2_relationship": f"{_DEP}.Row2[0].f1_38[0]",
+    # Row 3 (y=447): dep3
+    "dep3_first": f"{_DEP}.Row3[0].f1_39[0]",
+    "dep3_last": f"{_DEP}.Row3[0].f1_40[0]",
     "dep3_ssn": f"{_DEP}.Row3[0].f1_41[0]",
-    "dep3_relationship": f"{_DEP}.Row4[0].f1_45[0]",
-    "dep4_first": f"{_DEP}.Row1[0].f1_34[0]",
-    "dep4_last": f"{_DEP}.Row2[0].f1_38[0]",
-    "dep4_ssn": f"{_DEP}.Row3[0].f1_42[0]",
+    "dep3_relationship": f"{_DEP}.Row3[0].f1_42[0]",
+    # Row 4 (y=435): dep4
+    "dep4_first": f"{_DEP}.Row4[0].f1_43[0]",
+    "dep4_last": f"{_DEP}.Row4[0].f1_44[0]",
+    "dep4_ssn": f"{_DEP}.Row4[0].f1_45[0]",
     "dep4_relationship": f"{_DEP}.Row4[0].f1_46[0]",
+
+    # Dependent checkboxes: child tax credit (CTC) and credit for other dependents
+    # Row 5 (y=425/413): CTC/ODC checkboxes per dependent column
+    "dep1_ctc": f"{_DEP}.Row5[0].Dependent1[0].c1_12[0]",
+    "dep1_odc": f"{_DEP}.Row5[0].Dependent1[0].c1_13[0]",
+    "dep2_ctc": f"{_DEP}.Row5[0].Dependent2[0].c1_14[0]",
+    "dep2_odc": f"{_DEP}.Row5[0].Dependent2[0].c1_15[0]",
+    "dep3_ctc": f"{_DEP}.Row5[0].Dependent3[0].c1_16[0]",
+    "dep3_odc": f"{_DEP}.Row5[0].Dependent3[0].c1_17[0]",
+    "dep4_ctc": f"{_DEP}.Row5[0].Dependent4[0].c1_18[0]",
+    "dep4_odc": f"{_DEP}.Row5[0].Dependent4[0].c1_19[0]",
 
     # Income lines
     "line1a_wages": f"{_P1}.f1_47[0]",
@@ -223,9 +245,9 @@ def map_f1040(tax_return: TaxReturn) -> Dict[str, str]:
             result[fields["spouse_last_name"]] = sp_parts[-1] if len(sp_parts) > 1 else ""
 
     if tp.ssn:
-        result[fields["your_ssn"]] = tp.ssn
+        result[fields["your_ssn"]] = tp.ssn.replace("-", "")
     if tp.spouse_ssn:
-        result[fields["spouse_ssn"]] = tp.spouse_ssn
+        result[fields["spouse_ssn"]] = tp.spouse_ssn.replace("-", "")
 
     # Address
     if tp.address_line1:
@@ -240,15 +262,21 @@ def map_f1040(tax_return: TaxReturn) -> Dict[str, str]:
             if len(state_zip) > 1:
                 result[fields["zip"]] = state_zip[-1]
 
-    # Dependents (2025 column layout)
-    dep_fields = [
-        ("dep1_first", "dep1_last", "dep1_ssn", "dep1_relationship"),
-        ("dep2_first", "dep2_last", "dep2_ssn", "dep2_relationship"),
-        ("dep3_first", "dep3_last", "dep3_ssn", "dep3_relationship"),
-        ("dep4_first", "dep4_last", "dep4_ssn", "dep4_relationship"),
+    # Main home in U.S. checkbox
+    result[fields["main_home_us"]] = "/1"
+
+    # Digital assets: default to "No"
+    result[fields["digital_assets_no"]] = "/1"
+
+    # Dependents
+    dep_keys = [
+        ("dep1_first", "dep1_last", "dep1_ssn", "dep1_relationship", "dep1_ctc", "dep1_odc"),
+        ("dep2_first", "dep2_last", "dep2_ssn", "dep2_relationship", "dep2_ctc", "dep2_odc"),
+        ("dep3_first", "dep3_last", "dep3_ssn", "dep3_relationship", "dep3_ctc", "dep3_odc"),
+        ("dep4_first", "dep4_last", "dep4_ssn", "dep4_relationship", "dep4_ctc", "dep4_odc"),
     ]
     for i, dep in enumerate(tp.dependents[:4]):
-        first_key, last_key, ssn_key, rel_key = dep_fields[i]
+        first_key, last_key, ssn_key, rel_key, ctc_key, odc_key = dep_keys[i]
         dep_name_parts = dep.name.split()
         if len(dep_name_parts) > 1:
             result[fields[first_key]] = " ".join(dep_name_parts[:-1])
@@ -256,12 +284,23 @@ def map_f1040(tax_return: TaxReturn) -> Dict[str, str]:
         else:
             result[fields[first_key]] = dep.name
         if dep.ssn:
-            result[fields[ssn_key]] = dep.ssn
+            result[fields[ssn_key]] = dep.ssn.strip().replace("-", "")
         result[fields[rel_key]] = dep.relationship
+        # Check child tax credit (under 17) or credit for other dependents
+        if dep.qualifies_for_child_tax_credit:
+            result[fields[ctc_key]] = "/1"
+        else:
+            result[fields[odc_key]] = "/1"
 
     # Income lines
     result[fields["line1a_wages"]] = _dollars(inc.wages)
     result[fields["line1z_total_wages"]] = _dollars(inc.wages)
+    # Line 2a: Tax-exempt interest (1099-INT Box 8)
+    tax_exempt_interest = sum(
+        getattr(f, "tax_exempt_interest", 0.0) for f in tax_return.form_1099_int
+    )
+    if tax_exempt_interest > 0:
+        result[fields["line2a_tax_exempt_interest"]] = _dollars(tax_exempt_interest)
     result[fields["line2b_taxable_interest"]] = _dollars(inc.interest_income)
     result[fields["line3a_qualified_dividends"]] = _dollars(inc.qualified_dividends)
     result[fields["line3b_ordinary_dividends"]] = _dollars(inc.dividend_income)
@@ -293,32 +332,32 @@ def map_f1040(tax_return: TaxReturn) -> Dict[str, str]:
     result[fields["line14_total_deductions"]] = _dollars(fed.deductions)
     result[fields["line15_taxable_income"]] = _dollars(fed.taxable_income)
 
-    # Tax
-    result[fields["line16_tax"]] = _dollars(fed.tax_before_credits)
+    # Line 16: Income tax only (from tax table / QD&CG worksheet)
+    income_tax = fed.ordinary_income_tax + fed.qualified_dividend_ltcg_tax
+    result[fields["line16_tax"]] = _dollars(income_tax)
 
-    # Other taxes (SE + Additional Medicare + NIIT) -> Schedule 2
-    other_taxes = fed.self_employment_tax + fed.additional_medicare_tax + fed.niit
-    if other_taxes > 0:
-        result[fields["line17_schedule2"]] = _dollars(other_taxes)
-        result[fields["line18_total_line16_17"]] = _dollars(fed.tax_before_credits + other_taxes)
-    else:
-        result[fields["line18_total_line16_17"]] = _dollars(fed.tax_before_credits)
+    # Line 17: Schedule 2, Part I, line 3 (AMT + excess premium tax credit) — 0 for most
+    # Line 18: Line 16 + Line 17
+    result[fields["line18_total_line16_17"]] = _dollars(income_tax)
 
-    # Credits
+    # Credits (Lines 19-21)
     if fed.child_tax_credit > 0:
         result[fields["line19_child_tax_credit"]] = _dollars(fed.child_tax_credit)
     total_credits = fed.credits
     if total_credits > 0:
         result[fields["line21_total_credits"]] = _dollars(total_credits)
 
-    tax_minus_credits = fed.tax_before_credits + other_taxes - total_credits
-    result[fields["line22_tax_minus_credits"]] = _dollars(max(0, tax_minus_credits))
+    # Line 22: Line 18 - Line 21 (not less than zero)
+    tax_minus_credits = max(0, income_tax - total_credits)
+    result[fields["line22_tax_minus_credits"]] = _dollars(tax_minus_credits)
 
-    # Line 23: Other taxes from Schedule 2, line 21
+    # Line 23: Schedule 2, Part II, line 21 (SE tax + Additional Medicare + NIIT)
+    other_taxes = fed.self_employment_tax + fed.additional_medicare_tax + fed.niit
     if other_taxes > 0:
         result[fields["line23_other_taxes"]] = _dollars(other_taxes)
 
-    result[fields["line24_total_tax"]] = _dollars(fed.tax_after_credits)
+    # Line 24: Total tax = Line 22 + Line 23
+    result[fields["line24_total_tax"]] = _dollars(tax_minus_credits + other_taxes)
 
     # Payments
     w2_withheld = sum(w.federal_withheld for w in tax_return.w2_forms)

@@ -69,6 +69,9 @@ def config_from_form(form) -> TaxProfileConfig:
         spouse_name=(form.get("spouse_name") or "").strip() or None,
         filing_status=filing_status,
         age=_int(form, "age", 30),
+        date_of_birth=(form.get("date_of_birth") or "").strip(),
+        spouse_dob=(form.get("spouse_dob") or "").strip(),
+        county=(form.get("county") or "").strip(),
         state_of_residence=state_of_residence,
         is_ca_resident=(state_of_residence == "CA"),
         is_renter=form.get("is_renter") in ("true", "1", "on", "yes"),
@@ -117,6 +120,15 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
         config.state_of_residence = so
     config.is_ca_resident = config.state_of_residence == "CA"
     config.is_renter = form.get("is_renter") in ("true", "1", "on", "yes")
+    dob = (form.get("date_of_birth") or "").strip()
+    if dob:
+        config.date_of_birth = dob
+    sp_dob = (form.get("spouse_dob") or "").strip()
+    if sp_dob:
+        config.spouse_dob = sp_dob
+    county_val = (form.get("county") or "").strip()
+    if county_val:
+        config.county = county_val
     doc_folder = (form.get("document_folder") or "").strip()
     if doc_folder:
         config.document_folder = doc_folder
@@ -623,6 +635,16 @@ INDEX_HTML = """
         </div>
       </div>
       <div class="field-row">
+        <div>
+          <label>Your DOB <span class="label-hint">- for CA 540</span></label>
+          <input type="text" name="date_of_birth" placeholder="MM/DD/YYYY" maxlength="10">
+        </div>
+        <div id="spouseDobField" style="display:none">
+          <label>Spouse DOB</label>
+          <input type="text" name="spouse_dob" placeholder="MM/DD/YYYY" maxlength="10">
+        </div>
+      </div>
+      <div class="field-row">
         <div style="max-width:100px">
           <label>Age</label>
           <input type="number" name="age" value="30" min="1" max="120">
@@ -632,6 +654,10 @@ INDEX_HTML = """
           <select name="state_of_residence">
             {{ state_options | safe }}
           </select>
+        </div>
+        <div style="max-width:200px">
+          <label>County <span class="label-hint">- for CA 540</span></label>
+          <input type="text" name="county" placeholder="e.g. Santa Clara">
         </div>
       </div>
       <div class="checkbox-row">
@@ -806,9 +832,12 @@ INDEX_HTML = """
   /* Show/hide spouse SSN based on filing status */
   const filingStatus = document.getElementById('filingStatus');
   const spouseSsnRow = document.getElementById('spouseSsnRow');
+  const spouseDobField = document.getElementById('spouseDobField');
   function updateSpouseRow() {
     const v = filingStatus.value;
-    spouseSsnRow.style.display = (v === 'married_jointly' || v === 'married_separately') ? '' : 'none';
+    const show = (v === 'married_jointly' || v === 'married_separately');
+    spouseSsnRow.style.display = show ? '' : 'none';
+    spouseDobField.style.display = show ? '' : 'none';
   }
   filingStatus.addEventListener('change', updateSpouseRow);
   updateSpouseRow();

@@ -5,7 +5,7 @@ Field names verified against 2024 IRS fillable PDF (f1040se.pdf).
 """
 
 from typing import Dict
-from ..models import TaxReturn
+from ..models import TaxReturn, FilingStatus
 from . import register
 
 
@@ -17,6 +17,10 @@ def _dollars(amount: float) -> str:
 # Each expense line has 3 columns (A/B/C) for up to 3 properties.
 # Verified via: python tools/discover_fields.py pdf_templates/2024/se.pdf
 FIELD_NAMES_2024 = {
+    # Header
+    "name": "topmostSubform[0].Page1[0].f1_1[0]",
+    "ssn": "topmostSubform[0].Page1[0].f1_2[0]",
+
     # Property addresses (Line 1a - RowA/B/C)
     "prop_a_address": "topmostSubform[0].Page1[0].Table_Line1a[0].RowA[0].f1_3[0]",
     "prop_b_address": "topmostSubform[0].Page1[0].Table_Line1a[0].RowB[0].f1_4[0]",
@@ -144,6 +148,15 @@ def map_schedule_e(tax_return: TaxReturn) -> Dict[str, str]:
     year = tax_return.tax_year
     fields = FIELD_NAMES.get(year, FIELD_NAMES_2024)
     result = {}
+
+    # Header (joint name for MFJ; SSN without dashes per IRS convention)
+    tp = tax_return.taxpayer
+    if tp.filing_status == FilingStatus.MARRIED_FILING_JOINTLY and tp.spouse_name:
+        result[fields["name"]] = f"{tp.name} & {tp.spouse_name}"
+    else:
+        result[fields["name"]] = tp.name
+    if tp.ssn:
+        result[fields["ssn"]] = tp.ssn.replace("-", "")
 
     # Map up to 3 properties (A, B, C columns)
     col_keys = ["a", "b", "c"]

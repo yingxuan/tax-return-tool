@@ -97,10 +97,10 @@ def map_schedule_a(tax_return: TaxReturn) -> Dict[str, str]:
 
     sched_a_data = tax_return.schedule_a_data
 
-    # Name and SSN
+    # Name and SSN (IRS: no dashes)
     result[fields["name"]] = tax_return.taxpayer.name
     if tax_return.taxpayer.ssn:
-        result[fields["ssn"]] = tax_return.taxpayer.ssn
+        result[fields["ssn"]] = tax_return.taxpayer.ssn.replace("-", "")
 
     # Medical (Lines 1-4)
     if sched_a_data and sched_a_data.medical_expenses > 0:
@@ -112,7 +112,9 @@ def map_schedule_a(tax_return: TaxReturn) -> Dict[str, str]:
     # Taxes paid (Lines 5a-7)
     if sched_a_data:
         result[fields["line5a_state_local_tax"]] = _dollars(sched_a_data.state_income_tax_paid)
-        result[fields["line5a_check_income_tax"]] = "/1"  # Income tax (not sales tax)
+        # Only check "Income tax" when state income tax was actually paid (not for real-estate-only)
+        if sched_a_data.state_income_tax_paid > 0:
+            result[fields["line5a_check_income_tax"]] = "/1"
         result[fields["line5b_real_estate_tax"]] = _dollars(sched_a_data.real_estate_taxes)
         vlf = sched_a_data.total_vehicle_license_fees
         if vlf > 0:

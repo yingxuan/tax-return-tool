@@ -103,6 +103,9 @@ class TaxProfileConfig:
     is_renter: bool = False
     address_line1: str = ""  # Street address
     address_line2: str = ""  # City, State ZIP
+    date_of_birth: str = ""  # MM/DD/YYYY format for PDF forms
+    spouse_dob: str = ""  # MM/DD/YYYY format for PDF forms
+    county: str = ""  # County of residence (for CA 540)
     dependents: List[DependentConfig] = field(default_factory=list)
     document_folder: Optional[str] = None
     rental_1098_keywords: List[str] = field(default_factory=list)
@@ -206,6 +209,9 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         is_renter=taxpayer.get("is_renter", False),
         address_line1=taxpayer.get("address_line1", ""),
         address_line2=taxpayer.get("address_line2", ""),
+        date_of_birth=str(taxpayer.get("date_of_birth", "") or ""),
+        spouse_dob=str(taxpayer.get("spouse_dob", "") or ""),
+        county=str(taxpayer.get("county", "") or ""),
         dependents=deps,
         document_folder=raw.get("document_folder"),
         rental_1098_keywords=[

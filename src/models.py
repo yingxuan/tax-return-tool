@@ -59,6 +59,7 @@ class Form1099Int:
     payer_name: str
     interest_income: float = 0.0  # Box 1
     us_treasury_interest: float = 0.0  # Box 3: Interest on U.S. Treasury obligations
+    tax_exempt_interest: float = 0.0  # Box 8: Tax-exempt interest (e.g. municipal bonds)
     federal_withheld: float = 0.0  # Box 4
 
 
@@ -362,6 +363,9 @@ class TaxpayerInfo:
     is_renter: bool = False  # For CA Renter's Credit
     address_line1: str = ""  # Street address (e.g. "123 Main St")
     address_line2: str = ""  # City, State ZIP (e.g. "San Jose, CA 95123")
+    date_of_birth: Optional[str] = None  # MM/DD/YYYY format for PDF forms
+    spouse_dob: Optional[str] = None  # MM/DD/YYYY format for PDF forms
+    county: str = ""  # County of residence (for CA 540)
 
     @property
     def num_dependents(self) -> int:

@@ -251,6 +251,9 @@ def _build_taxpayer_from_config(config: TaxProfileConfig) -> TaxpayerInfo:
         is_renter=config.is_renter,
         address_line1=getattr(config, "address_line1", ""),
         address_line2=getattr(config, "address_line2", ""),
+        date_of_birth=getattr(config, "date_of_birth", None) or None,
+        spouse_dob=getattr(config, "spouse_dob", None) or None,
+        county=getattr(config, "county", ""),
         dependents=deps,
     )
 

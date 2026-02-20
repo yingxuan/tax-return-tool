@@ -18,7 +18,8 @@
       "Bash(ls:*)",
       "Bash(git rm:*)",
       "Bash(curl:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(pip show:*)"
     ]
   }
 }

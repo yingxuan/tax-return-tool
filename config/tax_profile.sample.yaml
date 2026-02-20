@@ -12,6 +12,11 @@ taxpayer:
   age: 40
   is_ca_resident: true
   is_renter: false
+  address_line1: "123 Main St"
+  address_line2: "San Jose, CA 95123"
+  # date_of_birth: "01/15/1985"    # MM/DD/YYYY — for CA 540 form
+  # spouse_dob: "03/20/1987"       # MM/DD/YYYY — for CA 540 form
+  county: "Santa Clara"             # County of residence — for CA 540 form
   dependents:
     - name: "Child1"
       age: 10
