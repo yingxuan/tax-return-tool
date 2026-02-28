@@ -383,7 +383,7 @@ def generate_full_report(tax_return: TaxReturn) -> str:
         lines.append("    (Verify against 1099-DIV Box 1b; set qualified_dividends in config if extraction is low.)")
     lines.append(_line("Capital Gains (1099-B/DIV)", inc.capital_gains))
     if inc.capital_gains <= 0:
-        lines.append("    (If you have broker/1099-B statements with gains, set Document folder to a path that includes them, e.g. .../2025/1099/brokers.)")
+        lines.append("    (If you have broker/1099-B statements with gains, verify they are included in your document folder.)")
     lines.append(_line("Self-Employment (1099-NEC)", inc.self_employment_income))
     lines.append(_line("Retirement (1099-R)", inc.retirement_income))
     lines.append(_line("Net Rental Income (Schedule E)", inc.rental_income))

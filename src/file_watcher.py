@@ -129,41 +129,12 @@ class TaxDocumentWatcher:
 
     def _categorize_file(self, file_path: Path) -> Optional[str]:
         """
-        Categorize a file using folder structure first, then filename.
+        Pre-parse categorization is intentionally disabled.
 
-        Folder segments are checked deepest-first against
-        FOLDER_CATEGORY_MAP.  If a match is found, special refinement
-        is applied (e.g. 1098-T inside the 1098 folder, or 1099-G
-        inside the 1099 folder).  Falls back to filename keyword
-        matching.
-
-        Args:
-            file_path: Absolute path of the file.
-
-        Returns:
-            Category string or None if unrecognized.
+        Document type is determined entirely from content during
+        extraction, not from folder or filename heuristics.
         """
-        # Compute path segments relative to the watch directory
-        try:
-            rel = file_path.relative_to(self.watch_dir)
-        except ValueError:
-            rel = file_path
-
-        # Walk parent segments deepest-first (exclude the filename itself)
-        parts = [p.lower() for p in rel.parts[:-1]]
-        for segment in reversed(parts):
-            if segment in FOLDER_CATEGORY_MAP:
-                category = FOLDER_CATEGORY_MAP[segment]
-                # Refine within 1098 folder
-                if category == '1098':
-                    category = self._refine_1098_from_filename(file_path.name, category)
-                # Refine within 1099 folder
-                if category == '1099':
-                    category = self._refine_1099_from_filename(file_path.name) or '1099'
-                return category
-
-        # Fallback: filename-based keyword matching
-        return self._categorize_by_filename(file_path.name)
+        return None
 
     @staticmethod
     def _refine_1099_from_filename(filename: str) -> Optional[str]:
@@ -288,34 +259,45 @@ class TaxDocumentWatcher:
 
     def get_summary(self) -> Dict[str, List[DetectedFile]]:
         """
-        Get a summary of all detected files grouped by category.
+        Get a summary of all detected files grouped by file type.
+
+        Groups files by broad type (PDF, Spreadsheet, Image) since
+        form type is determined by content during extraction, not by
+        folder or filename heuristics.
 
         Returns:
-            Dictionary mapping category names to lists of files.
+            Dictionary mapping file-type labels to lists of files.
         """
+        _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp'}
+        _SHEET_EXTS = {'.csv', '.xlsx', '.xls'}
+
         all_files = self.scan_directory()
-        categorized: Dict[str, List[DetectedFile]] = {}
+        grouped: Dict[str, List[DetectedFile]] = {}
         for f in all_files:
-            cat = f.category or "Uncategorized"
-            if cat not in categorized:
-                categorized[cat] = []
-            categorized[cat].append(f)
-        return categorized
+            if f.extension in _SHEET_EXTS:
+                bucket = 'Spreadsheet'
+            elif f.extension in _IMAGE_EXTS:
+                bucket = 'Image'
+            else:
+                bucket = 'PDF'
+            grouped.setdefault(bucket, []).append(f)
+        return grouped
 
     @staticmethod
-    def print_summary(categorized: Dict[str, List[DetectedFile]]):
-        """Print a formatted summary of detected files."""
+    def print_summary(grouped: Dict[str, List[DetectedFile]]):
+        """Print a flat inventory grouped by file type."""
         print("\n" + "=" * 60)
         print("  TAX DOCUMENT INVENTORY")
         print("=" * 60)
 
         total = 0
-        for category, files in sorted(categorized.items()):
-            tag = "[structured]" if category in EXTRACTABLE_CATEGORIES else "[OCR]"
-            print(f"\n  {category} {tag}:")
+        for bucket in ('PDF', 'Spreadsheet', 'Image'):
+            files = grouped.get(bucket, [])
+            if not files:
+                continue
+            print(f"\n  {bucket}:")
             for f in files:
                 size_kb = f.size_bytes / 1024
-                # Use ASCII-safe filename for print (Windows cp1252 can't handle some Unicode)
                 safe_name = f.filename.encode('ascii', errors='replace').decode('ascii')
                 print(f"    - {safe_name} ({size_kb:.1f} KB)")
                 total += 1

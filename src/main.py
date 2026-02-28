@@ -286,15 +286,15 @@ def process_tax_documents(
     doc_folder = local_folder or (config.document_folder if config else None)
 
     if doc_folder:
-        # Use folder-aware categorization to print inventory
+        # Print inventory and collect all files for parsing.
+        # Form type is determined entirely from document content —
+        # no folder or filename hints are used.
         summary = scan_and_categorize_folder(doc_folder)
 
-        # Collect all files for parsing (OCR/text extraction)
         all_files = []
-        for category, files in summary.items():
+        for files in summary.values():
             for f in files:
                 all_files.append(f.path)
-                category_hints[f.path] = category
 
         if all_files:
             print(f"\nProcessing {len(all_files)} document(s) through OCR/parsing...")
@@ -428,7 +428,20 @@ def process_tax_documents(
                     tax_return._insurance_records.append(result.data)
 
     # Resolve property tax receipts: split into primary (Schedule A) vs rental (Schedule E).
-    # Build a unified list of parcels from all receipts.
+    # Build rental address keywords from config for content-based matching.
+    rental_addr_keywords = []
+    if config:
+        rental_addr_keywords.extend(kw.lower() for kw in (config.rental_1098_keywords or []))
+        for rp in (config.rental_properties or []):
+            # Add words >4 chars from the rental address (e.g. "hiawatha", "sunnyvale")
+            rental_addr_keywords.extend(
+                w.lower() for w in (rp.address or "").split() if len(w) > 4
+            )
+
+    def _is_rental_parcel(address: str) -> bool:
+        addr_lower = (address or "").lower()
+        return bool(rental_addr_keywords and any(kw in addr_lower for kw in rental_addr_keywords))
+
     ptax_receipts = getattr(tax_return, '_property_tax_receipts', [])
     if ptax_receipts:
         primary_apn = (config.primary_home_apn if config else "").strip()
@@ -437,7 +450,7 @@ def process_tax_documents(
             if rec.parcels:
                 all_parcels.extend(rec.parcels)
             elif rec.address or rec.is_rental:
-                # Single-property receipt (payment history format or folder-tagged)
+                # Single-property receipt (payment history format)
                 from src.data_extractor import PropertyTaxParcel
                 all_parcels.append(PropertyTaxParcel(
                     apn=getattr(rec, 'parcels', [{}])[0].apn if rec.parcels else "",
@@ -451,7 +464,7 @@ def process_tax_documents(
                 tax_return.schedule_a_data.real_estate_taxes += rec.amount
 
         if len(all_parcels) > 1 and primary_apn:
-            # User selected a primary home — split accordingly
+            # User configured a primary home APN — split accordingly
             if tax_return.schedule_a_data is None:
                 tax_return.schedule_a_data = ScheduleAData()
             if not hasattr(tax_return, '_extracted_rental_property_tax'):
@@ -461,24 +474,17 @@ def process_tax_documents(
                     tax_return.schedule_a_data.real_estate_taxes += p.amount
                 else:
                     tax_return._extracted_rental_property_tax += p.amount
-        elif len(all_parcels) > 1:
-            # Multiple properties, no selection — store for UI to ask
-            tax_return._property_tax_parcels = all_parcels
-            # Default: put everything into primary
+        elif len(all_parcels) >= 1:
+            # Route each parcel by matching against known rental addresses from config.
             if tax_return.schedule_a_data is None:
                 tax_return.schedule_a_data = ScheduleAData()
+            if not hasattr(tax_return, '_extracted_rental_property_tax'):
+                tax_return._extracted_rental_property_tax = 0.0
             for p in all_parcels:
-                tax_return.schedule_a_data.real_estate_taxes += p.amount
-        elif len(all_parcels) == 1:
-            p = all_parcels[0]
-            if any(kw in (p.address or "").lower() for kw in ["rental", "rent"]):
-                if not hasattr(tax_return, '_extracted_rental_property_tax'):
-                    tax_return._extracted_rental_property_tax = 0.0
-                tax_return._extracted_rental_property_tax += p.amount
-            else:
-                if tax_return.schedule_a_data is None:
-                    tax_return.schedule_a_data = ScheduleAData()
-                tax_return.schedule_a_data.real_estate_taxes += p.amount
+                if _is_rental_parcel(p.address):
+                    tax_return._extracted_rental_property_tax += p.amount
+                else:
+                    tax_return.schedule_a_data.real_estate_taxes += p.amount
 
     # US Treasury interest: auto-extracted from 1099-INT/DIV Box 3.
     # Config value is used as a fallback override if auto-extraction finds nothing.
@@ -691,10 +697,11 @@ def process_tax_documents(
 
             tax_return.rental_properties.append(rental)
 
-        # Apply extracted property tax from receipts (2025 rental only) to first rental
+        # Apply extracted property tax from receipts to first rental property.
+        # Extracted value replaces the config value (docs take priority over config estimates).
         extracted_rental_ptax = getattr(tax_return, '_extracted_rental_property_tax', 0.0)
         if extracted_rental_ptax > 0 and tax_return.rental_properties:
-            tax_return.rental_properties[0].property_tax += extracted_rental_ptax
+            tax_return.rental_properties[0].property_tax = extracted_rental_ptax
 
         # Apply extracted insurance premiums to matching rental properties.
         # Only assign to rental if the insurance doc matches a rental address

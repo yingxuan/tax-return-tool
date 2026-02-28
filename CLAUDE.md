@@ -1,3 +1,6 @@
+# Sub-folder Context
+[继承全局指令："C:\Users\yxuan\workspace\CLAUDE.md"]
+
 # Tax Return Tool 项目规范
 
 ## 📋 常用命令

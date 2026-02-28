@@ -334,6 +334,8 @@ class TaxDataExtractor:
             r"\$?\s*([\d,]+\.\d{2})\s*(?:vehicle\s+license|VLF|license\s+fee)",
             r"(?:vehicle\s+license|VLF)[\s\S]{0,40}?\$?\s*([\d,]+\.\d{2})",
             r"([\d,]+\.\d{2})\s*[\s\S]{0,30}?(?:vehicle\s+license|VLF)",
+            # Lease agreement: "Initial registration fees" line is the DMV fee paid at signing
+            r"initial\s+registration\s+fees?[\s\S]{0,50}?([\d,]+\.\d{2})",
         ],
         'total_registration_fee': [
             r"(?:total\s+due|amount\s+due|balance\s+due|pay\s+this\s+amount)[:\s]*\$?\s*([\d,]+\.?\d*)",
@@ -587,6 +589,7 @@ class TaxDataExtractor:
         # Vehicle Registration
         if any(kw in text_upper for kw in [
             'VEHICLE LICENSE FEE', 'VLF', 'REGISTRATION RENEWAL', 'DMV',
+            'INITIAL REGISTRATION FEES',
         ]):
             return 'Vehicle Registration'
         # Estimated Payment
@@ -1260,11 +1263,6 @@ class TaxDataExtractor:
         # Format 1: Santa Clara County payment history (has Property Address + tabular rows)
         history = self._extract_payment_history_property_tax(text, tax_year)
         if history:
-            is_rental = (
-                "rental" in path_lower or "rent_home" in path_lower
-                or "rent_" in path_lower or "rent " in path_lower
-            )
-            history.is_rental = is_rental
             return ExtractionResult(
                 success=True,
                 form_type='Property Tax',
@@ -1299,14 +1297,10 @@ class TaxDataExtractor:
         if amount <= 0:
             warnings.append("Could not extract property tax amount")
         payment_date = self._parse_property_tax_date(text, document.file_path)
-        is_rental = (
-            "rental" in path_lower or "rent_home" in path_lower
-            or "rent_" in path_lower or "rent " in path_lower
-        )
         data = PropertyTaxReceipt(
             amount=amount,
             payment_date=payment_date,
-            is_rental=is_rental,
+            is_rental=False,  # Routing determined in main.py via config rental addresses
             parcels=parcels if len(parcels) > 1 else None,
         )
         return ExtractionResult(
@@ -2185,14 +2179,11 @@ class TaxDataExtractor:
 
             # Composite 1099: extract multiple form types from one document.
             # Try composite when: (1) doc looks like composite (multiple 1099 types), or
-            # (2) we have a 1099 hint and doc is composite or has 1099-B.
-            is_1099_hint = hint and (hint == '1099' or hint.startswith('1099-'))
+            # (2) doc contains 1099-B content (brokerage statement with just proceeds data).
             text_upper = (doc.text_content or "").upper()
             has_1099_b = "1099-B" in text_upper or "PROCEEDS FROM BROKER" in text_upper
             is_composite = self.is_composite_1099(doc.text_content)
-            try_composite = is_composite or (
-                is_1099_hint and (is_composite or (hint == "1099-B" and has_1099_b))
-            )
+            try_composite = is_composite or has_1099_b
             if try_composite:
                 composite_results = self.extract_composite_1099(doc)
                 if composite_results:
