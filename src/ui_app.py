@@ -615,36 +615,6 @@ INDEX_HTML = """
         </div>
       </div>
       <div class="field-row">
-        <div>
-          <label>Your name</label>
-          <input type="text" name="taxpayer_name" placeholder="First Last">
-        </div>
-        <div>
-          <label>SSN <span class="label-hint">- optional, for PDF forms</span></label>
-          <input type="text" name="taxpayer_ssn" placeholder="123-45-6789" maxlength="11" autocomplete="off">
-        </div>
-      </div>
-      <div class="field-row" id="spouseSsnRow" style="display:none">
-        <div>
-          <label>Spouse name</label>
-          <input type="text" name="spouse_name" placeholder="First Last">
-        </div>
-        <div>
-          <label>Spouse SSN <span class="label-hint">- optional, for PDF forms</span></label>
-          <input type="text" name="spouse_ssn" placeholder="987-65-4321" maxlength="11" autocomplete="off">
-        </div>
-      </div>
-      <div class="field-row">
-        <div>
-          <label>Your DOB <span class="label-hint">- for CA 540</span></label>
-          <input type="text" name="date_of_birth" placeholder="MM/DD/YYYY" maxlength="10">
-        </div>
-        <div id="spouseDobField" style="display:none">
-          <label>Spouse DOB</label>
-          <input type="text" name="spouse_dob" placeholder="MM/DD/YYYY" maxlength="10">
-        </div>
-      </div>
-      <div class="field-row">
         <div style="max-width:100px">
           <label>Age</label>
           <input type="number" name="age" value="30" min="1" max="120">
@@ -654,10 +624,6 @@ INDEX_HTML = """
           <select name="state_of_residence">
             {{ state_options | safe }}
           </select>
-        </div>
-        <div style="max-width:200px">
-          <label>County <span class="label-hint">- for CA 540</span></label>
-          <input type="text" name="county" placeholder="e.g. Santa Clara">
         </div>
       </div>
       <div class="checkbox-row">
