@@ -1020,22 +1020,8 @@ INDEX_HTML = """
     printBtn.type = 'button';
     printBtn.innerHTML = '\\u{1F5A8} Print';
     printBtn.addEventListener('click', () => window.print());
-    const dlBtn = document.createElement('button');
-    dlBtn.type = 'button';
-    dlBtn.className = 'dl-btn';
-    if (availableForms.length > 0) {
-      dlBtn.innerHTML = '\\u{1F4E5} Download PDF Forms';
-      dlBtn.addEventListener('click', () => {
-        window.location.href = '/download-forms?token=' + pdfToken;
-      });
-    } else {
-      dlBtn.innerHTML = '\\u{1F4E5} PDF Forms (no templates)';
-      dlBtn.disabled = true;
-      dlBtn.title = 'Place fillable PDF templates in pdf_templates/<year>/ to enable';
-    }
     toolbar.appendChild(copyBtn);
     toolbar.appendChild(printBtn);
-    toolbar.appendChild(dlBtn);
     report.insertBefore(toolbar, report.firstChild);
   }
 
