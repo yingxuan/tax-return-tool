@@ -663,7 +663,7 @@ INDEX_HTML = """
           <label>Filing Status</label>
           <select name="filing_status" required id="filingStatus">
             <option value="single">Single</option>
-            <option value="married_jointly">Married Filing Jointly</option>
+            <option value="married_jointly" selected>Married Filing Jointly</option>
             <option value="married_separately">Married Filing Separately</option>
             <option value="head_of_household">Head of Household</option>
           </select>
