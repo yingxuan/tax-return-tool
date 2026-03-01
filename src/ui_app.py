@@ -1139,9 +1139,9 @@ INDEX_HTML = """
     submitBtn.disabled = true;
     submitBtn.classList.remove('pulse');
     loadingOverlay.classList.add('active');
-    setFormDisabled(true);
     const fd = new FormData(form);
     for (const f of droppedFiles) fd.append('documents', f);
+    setFormDisabled(true);
     try {
       const r = await fetch('/run', { method: 'POST', body: fd });
       const data = await r.json().catch(() => ({}));
