@@ -681,11 +681,11 @@ INDEX_HTML = """
           </select>
         </div>
         <div style="max-width:130px">
-          <label>Children under 17 <span class="label-hint">(Child Tax Credit)</span></label>
+          <label># Children under 17 <span class="label-hint">(Child Tax Credit)</span></label>
           <input type="number" name="num_children" value="0" min="0" max="20">
         </div>
         <div style="max-width:130px">
-          <label>Other dependents <span class="label-hint">($500 credit each)</span></label>
+          <label># Other dependents <span class="label-hint">($500 credit each)</span></label>
           <input type="number" name="num_other_dependents" value="0" min="0" max="20">
         </div>
       </div>
