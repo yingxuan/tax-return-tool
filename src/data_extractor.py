@@ -95,8 +95,13 @@ class TaxDataExtractor:
             r"Box\s*1[:\s]*([\d,]+\.?\d*)",
         ],
         'federal_withheld': [
-            # Labeled field pattern (most reliable)
-            r"Federal\s+income\s+tax\s+withheld\s*\$?([\d,]+\.?\d*)",
+            # OCR layout: "1 Wages... 2 Federal income tax withheld\n<box1> <box2>"
+            # Box 1 and box 2 land on the same next line — skip box1, capture box2.
+            r"2\s+Federal\s+income\s+tax\s+withheld\s*\n\s*[\d,]+\.?\d{2}\s+([\d,]+\.?\d{2})",
+            # Earnings summary sidebar: "FED. INCOME 12,519.25"
+            r"FED(?:ERAL)?\.?\s*INCOME\s+(?:TAX\s+)?([\d,]+\.\d{2})",
+            # Labeled field — only when NOT preceded on the same line by wages
+            r"Federal\s+income\s+tax\s+withheld\s*\n\s*\$?([\d,]+\.?\d*)",
             # Second number in the pair
             r"[\d,]+\.?\d{2}\s+([\d,]+\.?\d{2})\s*\n.*?3\s*Social",
             r"2\s+Federal.*?\n\s*[\d,]+\.?\d{2}\s+([\d,]+\.?\d{2})",
@@ -187,8 +192,14 @@ class TaxDataExtractor:
             r"1\s+Rents[^$]*\$?([\d,]+\.?\d*)",
         ],
         'other_income': [
-            r"(?:box\s*3|other\s+income)[:\s]*\$?([\d,]+\.?\d*)",
-            r"3\s+Other\s+income[^$]*\$?([\d,]+\.?\d*)",
+            # Prefer the copy where the $ amount appears at the start of the
+            # line (only whitespace before it), which is the cleanest rendered
+            # copy in multi-copy PDFs.  Allow 2 lines of noise between the box
+            # label and the amount line.
+            r"3\s*Other\s*income[^\n]*\n[^\n]*\n\s*\$\s*((?!0\.00)[\d,]+\.\d{2})",
+            # Fallback: general scan within 80 chars, skip $0.00
+            r"3\s*Other\s*income[\s\S]{0,80}?\$\s*((?!0\.00)[\d,]+\.\d{2})",
+            r"(?:box\s*3|other\s+income)[\s\S]{0,80}?\$\s*((?!0\.00)[\d,]+\.\d{2})",
         ],
         'federal_withheld': [
             r"(?:box\s*4|federal\s+income\s+tax\s+withheld)[:\s]*\$?([\d,]+\.?\d*)",
@@ -252,8 +263,12 @@ class TaxDataExtractor:
             r"RECIPIENT.?S\s+NAME[^A-Z]*([A-Z][A-Za-z\s&.,]+)",
         ],
         'mortgage_interest': [
+            # Standard format: "1 Mortgage interest ... $33,073.96"
             r"1\s*Mortgage\s*interest\s*(?:received)?[^$]*\$([\d,]+\.\d{2})",
-            r"Mortgage\s*interest\s*(?:received\s*from)?[^$]*\$([\d,]+\.\d{2})",
+            # Spatial format: amount on separate line below the label (no $ prefix)
+            # "1 Mortgage interest received from ...\n\n33,073.96"
+            r"1\s*Mortgage\s*interest[^\n]+\n[^\n]*\n\s*([\d,]+\.\d{2})",
+            r"Mortgage\s*interest\s*(?:received\s*from)?[^$\n]*\$\s*\|?\s*([\d,]+\.\d{2})",
             r"(?:box\s*1|mortgage\s+interest)[:\s]*\$?([\d,]+\.?\d+)",
         ],
         'property_taxes': [
@@ -935,11 +950,17 @@ class TaxDataExtractor:
         # taxable_amount = 0 is expected and correct — do NOT fall back to gross.
         non_taxable_codes = {"G", "H", "Q"}
         code_upper = (dist_code or "").strip().upper()
+        taxable_was_extracted = taxable_str is not None  # None means extraction failed
         if code_upper in non_taxable_codes:
             # Trust that taxable = 0 is intentional for these codes
             taxable_not_determined = False
             final_taxable = taxable  # keep 0
-        elif taxable <= 0 and gross > 0:
+        elif taxable_was_extracted and taxable == 0 and gross > 0:
+            # Box 2a was explicitly $0.00 — trust it (e.g. non-taxable rollover/basis recovery)
+            taxable_not_determined = False
+            final_taxable = 0.0
+        elif not taxable_was_extracted and gross > 0:
+            # Could not extract Box 2a at all — fall back to gross as conservative estimate
             taxable_not_determined = True
             final_taxable = gross
         else:

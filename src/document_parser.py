@@ -83,58 +83,51 @@ class DocumentParser:
         """
         Parse a PDF file to extract text and tables.
 
-        Args:
-            file_path: Path to the PDF file
+        Text extraction priority:
+          1. Spatial reconstruction — sorts all characters by (y, x) position,
+             correctly separating columns that pdfplumber's default stream order
+             interleaves.  Used when it produces clean, substantial text.
+          2. High-resolution OCR (300 DPI) — authoritative source for image-based
+             PDFs and any PDF where spatial reconstruction is garbled or empty.
 
-        Returns:
-            ParsedDocument with extracted content
+        The legacy pdfplumber default stream order is NOT used for final text;
+        it is retained only for structured table extraction.
         """
-        text_content = []
         tables = []
 
+        # Extract structured tables via pdfplumber (independent of text order)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*[Ff]ont[Bb]ox.*")
             warnings.filterwarnings("ignore", message=".*font descriptor.*")
             with pdfplumber.open(file_path) as pdf:
+                num_pages = max(len(pdf.pages), 1)
                 for page in pdf.pages:
-                    # Extract text
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_content.append(page_text)
-
-                    # Extract tables
                     page_tables = page.extract_tables()
                     for table in page_tables:
                         if table:
-                            # Convert to DataFrame for easier processing
                             df = pd.DataFrame(table[1:], columns=table[0] if table else None)
                             tables.append(df)
 
-        combined_text = '\n\n'.join(text_content)
+        # --- Text extraction: spatial first, OCR as high-priority fallback ---
 
-        # If pdfplumber found no text, fall back to OCR (scanned PDF)
-        if not combined_text.strip():
-            try:
-                from pdf2image import convert_from_path
-                images = convert_from_path(file_path)
-                ocr_parts = []
-                for img in images:
-                    ocr_text = pytesseract.image_to_string(img)
-                    if ocr_text:
-                        ocr_parts.append(ocr_text)
-                combined_text = '\n\n'.join(ocr_parts)
-            except ImportError:
-                # pdf2image not installed; try rendering with pdfplumber
-                try:
-                    with pdfplumber.open(file_path) as pdf2:
-                        for page in pdf2.pages:
-                            img = page.to_image(resolution=300).original
-                            ocr_text = pytesseract.image_to_string(img)
-                            if ocr_text:
-                                text_content.append(ocr_text)
-                    combined_text = '\n\n'.join(text_content)
-                except Exception:
-                    pass  # No OCR available
+        # Step 1: Spatial reconstruction (best for text-based PDFs)
+        spatial = self._parse_pdf_spatial(file_path)
+        spatial_ok = (
+            bool(spatial.strip())
+            and not self._is_garbled(spatial)
+            and len(spatial.strip()) >= 200 * num_pages
+        )
+
+        if spatial_ok:
+            combined_text = spatial
+        else:
+            # Step 2: High-resolution OCR — prioritised over garbled/thin/empty spatial
+            ocr_text = self._ocr_pdf(file_path)
+            if ocr_text.strip():
+                combined_text = ocr_text
+            else:
+                # Last resort: fall back to whatever spatial produced
+                combined_text = spatial
 
         return ParsedDocument(
             file_path=file_path,
@@ -142,6 +135,87 @@ class DocumentParser:
             text_content=combined_text,
             tables=tables
         )
+
+    @staticmethod
+    def _is_garbled(text: str) -> bool:
+        """Return True if the text looks like garbled PDF column-extraction.
+
+        PDFs with multi-column layouts sometimes yield a stream of single
+        characters on separate lines (e.g. 'Z\\nP\\nI\\nA\\n...') instead of
+        readable words.  If more than 40% of non-empty lines are ≤ 2 chars,
+        the text is considered garbled and OCR should be preferred.
+        """
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        if not lines:
+            return False
+        short = sum(1 for ln in lines if len(ln.strip()) <= 2)
+        return (short / len(lines)) > 0.40
+
+    def _parse_pdf_spatial(self, file_path: str) -> str:
+        """Re-extract PDF text by sorting characters spatially (row then column).
+
+        pdfplumber's default extraction reads characters in the order they appear
+        in the PDF content stream, which for multi-column forms interleaves chars
+        from adjacent columns.  Sorting by (y_top rounded to nearest 5pt, x0)
+        reconstructs the visual reading order.
+        """
+        page_texts = []
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                with pdfplumber.open(file_path) as pdf:
+                    for page in pdf.pages:
+                        chars = page.chars
+                        if not chars:
+                            continue
+                        # Round y to nearest 5pt to group chars on the same line
+                        rows: dict = {}
+                        for ch in chars:
+                            row_key = round(ch['top'] / 5) * 5
+                            rows.setdefault(row_key, []).append(ch)
+                        lines = []
+                        for y in sorted(rows):
+                            row_chars = sorted(rows[y], key=lambda c: c['x0'])
+                            # Insert a space when the gap between two chars
+                            # exceeds 30% of the font size — word boundary.
+                            parts = []
+                            prev_x1 = None
+                            prev_size = None
+                            for ch in row_chars:
+                                if prev_x1 is not None:
+                                    gap = ch['x0'] - prev_x1
+                                    avg_size = ((ch.get('size') or 10) + (prev_size or 10)) / 2
+                                    if gap > avg_size * 0.3:
+                                        parts.append(' ')
+                                parts.append(ch['text'])
+                                prev_x1 = ch['x1']
+                                prev_size = ch.get('size') or 10
+                            lines.append(''.join(parts))
+                        page_texts.append('\n'.join(lines))
+        except Exception:
+            return ''
+        return '\n\n'.join(page_texts)
+
+    def _ocr_pdf(self, file_path: str) -> str:
+        """Render each PDF page as an image and run Tesseract OCR on it."""
+        parts = []
+        try:
+            from pdf2image import convert_from_path
+            images = convert_from_path(file_path, dpi=300)
+        except ImportError:
+            # pdf2image not installed — render via pdfplumber
+            images = []
+            try:
+                with pdfplumber.open(file_path) as pdf2:
+                    for page in pdf2.pages:
+                        images.append(page.to_image(resolution=300).original)
+            except Exception:
+                return ''
+        for img in images:
+            ocr_text = pytesseract.image_to_string(img)
+            if ocr_text:
+                parts.append(ocr_text)
+        return '\n\n'.join(parts)
 
     def _parse_image(self, file_path: str) -> ParsedDocument:
         """

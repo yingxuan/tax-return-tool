@@ -367,22 +367,22 @@ def process_tax_documents(
                 tax_return._extracted_rentals.append(rental)
             elif result.form_type == '1098':
                 form = result.data
-                # Tag rental 1098s based on config keywords
-                # Match against lender name, property address (Box 8),
-                # source file path, and full document text
-                # Tag as rental when 1098 Box 8 (property address) matches rental_1098_keywords.
-                # If Box 8 is empty (not extracted), fall back to file path so e.g. mortgage-hiawatha.pdf is still tagged rental.
-                if config and config.rental_1098_keywords:
+                # Tag rental 1098s by matching the extracted property address (Box 8),
+                # file path, and full document text against rental property addresses
+                # from config.rental_properties.
+                if config and config.rental_properties:
+                    rental_kws = [
+                        w.lower()
+                        for rp in config.rental_properties
+                        for w in (rp.address or "").split()
+                        if len(w) > 4
+                    ]
                     addr = (form.property_address or "").lower()
                     path_lower = (result.source_file or "").lower()
                     doc_text = (result.source_text or "").lower()
-                    for kw in config.rental_1098_keywords:
-                        kw_lower = kw.lower()
-                        if (kw_lower in addr
-                                or kw_lower in path_lower
-                                or kw_lower in doc_text):
-                            form.is_rental = True
-                            break
+                    if any(kw in addr or kw in path_lower or kw in doc_text
+                           for kw in rental_kws):
+                        form.is_rental = True
                 tax_return.form_1098.append(form)
             elif result.form_type == '1099-G':
                 form = result.data
@@ -431,7 +431,6 @@ def process_tax_documents(
     # Build rental address keywords from config for content-based matching.
     rental_addr_keywords = []
     if config:
-        rental_addr_keywords.extend(kw.lower() for kw in (config.rental_1098_keywords or []))
         for rp in (config.rental_properties or []):
             # Add words >4 chars from the rental address (e.g. "hiawatha", "sunnyvale")
             rental_addr_keywords.extend(
@@ -708,27 +707,17 @@ def process_tax_documents(
         # (by address field or rental keywords in source text). Otherwise skip
         # (personal home insurance is not a deductible Schedule E expense).
         insurance_records = getattr(tax_return, '_insurance_records', [])
-        rental_keywords = [kw.lower() for kw in (config.rental_1098_keywords if config else [])]
         for ins in insurance_records:
             ins_addr = ins.property_address.lower()
             ins_text = (ins.source_text or "").lower()
             matched = False
             for rp in tax_return.rental_properties:
                 rp_addr = rp.address.lower()
-                # Match by address keyword overlap
                 ins_words = [w for w in ins_addr.split() if len(w) > 3]
                 rp_words = [w for w in rp_addr.split() if len(w) > 3]
-                if ins_words and any(w in rp_addr for w in ins_words):
-                    rp.insurance += ins.annual_premium
-                    matched = True
-                    break
-                # Match by rental keywords in source text
-                if any(kw in ins_text for kw in rental_keywords):
-                    rp.insurance += ins.annual_premium
-                    matched = True
-                    break
-                # Match by rental property address words in source text
-                if any(w in ins_text for w in rp_words):
+                # Match by address keyword overlap or rental property address words in source text
+                if (ins_words and any(w in rp_addr for w in ins_words)) or \
+                   any(w in ins_text for w in rp_words):
                     rp.insurance += ins.annual_premium
                     matched = True
                     break
@@ -802,9 +791,9 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
     print(f"\n  Personal mortgage interest:{fmt(pers_int)}")
     print(f"  Rental mortgage interest:  {fmt(rent_int)}")
     if tax_return.form_1098 and pers_int == 0 and rent_int > 0:
-        print("  *** NOTE: All 1098s are tagged [rental]. If Linda Vista (primary) has a 1098, add its address/lender to a non-matching name or check rental_1098_keywords.")
+        print("  *** NOTE: All 1098s are tagged [rental]. If the primary residence has a 1098, ensure its property address differs from addresses in rental_properties.")
     elif tax_return.form_1098 and pers_int == 0:
-        print("  *** NOTE: Personal mortgage interest is $0. Check 1098 extraction (amount parsed?) and rental_1098_keywords so primary residence 1098 is not tagged rental.")
+        print("  *** NOTE: Personal mortgage interest is $0. Check 1098 extraction (amount parsed?) and verify primary residence address does not match any rental_properties address.")
     print(f"  1098 Box 10 (personal) property taxes: {fmt(pers_prop_tax_1098)}")
     if tax_return.schedule_a_data is not None:
         print(f"  Schedule A real estate taxes (used for SALT): {fmt(tax_return.schedule_a_data.real_estate_taxes)}")
@@ -1128,6 +1117,15 @@ def main():
             print(f"  Tax year: {config.tax_year}")
             if config.document_folder:
                 print(f"  Document folder: {config.document_folder}")
+
+    print("\n  ------------------------------------------------------------")
+    print("  PRIVACY NOTICE")
+    print("  ------------------------------------------------------------")
+    print("  All processing runs 100% locally on your machine.")
+    print("  No documents, OCR results, or tax data are sent anywhere.")
+    print("  For extra assurance, you may disconnect from the internet")
+    print("  before running this command.")
+    print("  ------------------------------------------------------------\n")
 
     # Process documents
     tax_return = process_tax_documents(

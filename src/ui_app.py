@@ -58,9 +58,6 @@ def config_from_form(form) -> TaxProfileConfig:
     state_of_residence = (form.get("state_of_residence") or "CA").strip().upper()
     if len(state_of_residence) != 2:
         state_of_residence = "CA"
-    keywords_str = (form.get("rental_1098_keywords") or "").strip()
-    rental_1098_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
-
     return TaxProfileConfig(
         tax_year=_int(form, "tax_year", 2025),
         taxpayer_name=(form.get("taxpayer_name") or "Taxpayer").strip(),
@@ -77,7 +74,6 @@ def config_from_form(form) -> TaxProfileConfig:
         is_renter=form.get("is_renter") in ("true", "1", "on", "yes"),
         dependents=[],
         document_folder=document_folder,
-        rental_1098_keywords=rental_1098_keywords,
         capital_loss_carryover=_float(form, "capital_loss_carryover"),
         short_term_loss_carryover=_float(form, "short_term_loss_carryover"),
         long_term_loss_carryover=_float(form, "long_term_loss_carryover"),
@@ -132,9 +128,6 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     doc_folder = (form.get("document_folder") or "").strip()
     if doc_folder:
         config.document_folder = doc_folder
-    keywords_str = (form.get("rental_1098_keywords") or "").strip()
-    if keywords_str:
-        config.rental_1098_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
     config.capital_loss_carryover = _float(form, "capital_loss_carryover", config.capital_loss_carryover)
     config.short_term_loss_carryover = _float(form, "short_term_loss_carryover", config.short_term_loss_carryover)
     config.long_term_loss_carryover = _float(form, "long_term_loss_carryover", config.long_term_loss_carryover)
@@ -223,9 +216,9 @@ def _detect_missing(tax_return) -> dict:
     # Capital loss carryover (never auto-extracted)
     missing.append("capital_loss_carryover")
 
-    # Rental 1098: if multiple 1098s and none tagged rental, ask user to pick
+    # Rental 1098: if multiple 1098s and none tagged rental, warn but don't block
+    # (auto-matching uses rental_properties addresses; add property to config if needed)
     if len(tax_return.form_1098) > 1 and not any(f.is_rental for f in tax_return.form_1098):
-        missing.append("rental_1098_keywords")
         extras["lender_options"] = [
             {
                 "lender": f.lender_name,
@@ -395,9 +388,10 @@ INDEX_HTML = """
     .subtitle { color: #64748b; margin-bottom: 1.5rem; font-size: 0.93rem; line-height: 1.5; }
 
     /* Privacy banner */
-    .banner { display: flex; align-items: flex-start; gap: 0.5rem; background: #ecfdf5; border: 1px solid #a7f3d0;
+    .banner { display: flex; flex-direction: column; gap: 0.3rem; background: #ecfdf5; border: 1px solid #a7f3d0;
               border-radius: 10px; padding: 0.65rem 0.9rem; margin-bottom: 1.25rem; font-size: 0.88rem; color: #065f46; }
-    .banner svg { flex-shrink: 0; margin-top: 2px; }
+    .banner-row { display: flex; align-items: flex-start; gap: 0.5rem; }
+    .banner-row svg { flex-shrink: 0; margin-top: 2px; }
 
     /* Steps */
     .step { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.3rem 1.3rem 1.1rem;
@@ -582,8 +576,14 @@ INDEX_HTML = """
 <body>
 <div class="container">
   <div class="banner">
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a4.5 4.5 0 00-4.5 4.5V7H3a1 1 0 00-1 1v6a1 1 0 001 1h10a1 1 0 001-1V8a1 1 0 00-1-1h-.5V5.5A4.5 4.5 0 008 1zm0 1.5A3 3 0 0111 5.5V7H5V5.5A3 3 0 018 2.5z" fill="#2a7a2a"/></svg>
-    <span>Everything runs locally. Your data and documents never leave your computer.</span>
+    <div class="banner-row">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a4.5 4.5 0 00-4.5 4.5V7H3a1 1 0 00-1 1v6a1 1 0 001 1h10a1 1 0 001-1V8a1 1 0 00-1-1h-.5V5.5A4.5 4.5 0 008 1zm0 1.5A3 3 0 0111 5.5V7H5V5.5A3 3 0 018 2.5z" fill="#2a7a2a"/></svg>
+      <span>Everything runs locally. Your data and documents never leave your computer.</span>
+    </div>
+    <div class="banner-row">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2a7a2a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0119 12.55"/><path d="M5 12.55a10.94 10.94 0 015.17-2.39"/><path d="M10.71 5.05A16 16 0 0122.56 9"/><path d="M1.42 9a15.91 15.91 0 014.7-2.88"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+      <span>For maximum privacy, you may disconnect from the internet before processing.</span>
+    </div>
   </div>
 
   <h1>Tax Return Tool</h1>
@@ -744,13 +744,6 @@ INDEX_HTML = """
         <label>PAL carryover <span class="label-hint">- prior-year passive activity loss (Form 8582)</span></label>
         <input type="number" name="pal_carryover" step="0.01" value="0">
       </div>
-      <div class="field-wrap" data-field="rental_1098_keywords">
-        <label>Which 1098 is for a rental property?</label>
-        <p class="hint">Addresses below are from 1098 Box 8. Select the one that is your rental.</p>
-        <div id="lenderOptions"></div>
-        <input type="hidden" name="rental_1098_keywords" id="rental1098Hidden" value="">
-      </div>
-
       <button type="button" class="toggle-btn" id="advancedToggle">
         <span class="toggle-arrow" id="advancedArrow">&#9654;</span>
         <span>All other overrides</span>

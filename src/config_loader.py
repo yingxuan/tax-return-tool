@@ -108,7 +108,6 @@ class TaxProfileConfig:
     county: str = ""  # County of residence (for CA 540)
     dependents: List[DependentConfig] = field(default_factory=list)
     document_folder: Optional[str] = None
-    rental_1098_keywords: List[str] = field(default_factory=list)
     capital_loss_carryover: float = 0.0  # Single total (legacy); use ST/LT split when available
     short_term_loss_carryover: float = 0.0  # Prior-year ST capital loss carryover
     long_term_loss_carryover: float = 0.0  # Prior-year LT capital loss carryover
@@ -214,9 +213,6 @@ def load_config(path: str) -> Optional[TaxProfileConfig]:
         county=str(taxpayer.get("county", "") or ""),
         dependents=deps,
         document_folder=raw.get("document_folder"),
-        rental_1098_keywords=[
-            kw.lower() for kw in (raw.get("rental_1098_keywords") or [])
-        ],
         capital_loss_carryover=float(raw.get("capital_loss_carryover", 0.0)),
         short_term_loss_carryover=float(raw.get("short_term_loss_carryover", 0.0)),
         long_term_loss_carryover=float(raw.get("long_term_loss_carryover", 0.0)),
