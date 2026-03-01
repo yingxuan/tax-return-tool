@@ -26,6 +26,24 @@ Then open **http://localhost:5000** in your browser.
 
 ---
 
+## Privacy & Offline Mode
+
+This tool is designed to run **entirely on your own computer** — no cloud, no server, no account required.
+
+- All OCR is done locally via [Tesseract](https://github.com/tesseract-ocr/tesseract)
+- All PDF parsing is done locally via [pdfplumber](https://github.com/jsvine/pdfplumber) and [pypdf](https://github.com/py-pdf/pypdf)
+- No data is sent anywhere — not your documents, not extracted numbers, not your name or SSN
+
+**To run in fully offline mode:**
+
+1. Complete installation while online (`make install` downloads packages once)
+2. Disconnect from the internet (turn off Wi-Fi or unplug ethernet)
+3. Run the tool normally — `make web` or `python -m src.main --config ...`
+
+Everything works without a network connection. The only reason the tool needs internet access at all is to download its dependencies during initial setup.
+
+---
+
 ## What It Does
 
 Point it at a folder of tax documents and it:
