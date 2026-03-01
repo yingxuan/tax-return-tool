@@ -672,7 +672,7 @@ INDEX_HTML = """
       <div class="field-row">
         <div style="max-width:100px">
           <label>Age</label>
-          <input type="number" name="age" value="30" min="1" max="120">
+          <input type="number" name="age" value="40" min="1" max="120">
         </div>
         <div>
           <label>State of residence</label>
