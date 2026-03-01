@@ -96,7 +96,17 @@ make install
 make web          # or: python -m src.ui_app
 ```
 
-Open http://localhost:5000. Supports manual entry, folder scanning, and drag-and-drop file upload. No config file required.
+Open http://localhost:5000. The UI is fully self-contained — no config file needed.
+
+**Step 1 — Your Profile:** filing status, dependents, capital loss carryovers (with plain-English explanation), and remaining mortgage balance.
+
+**Rental Properties:** add each property with purchase price, date, and land value for depreciation. Expenses (insurance, property tax, management fees) are auto-extracted from your documents.
+
+**Step 2 — Tax Documents:** drag-and-drop files/folders, or type a folder path directly.
+
+**Step 3 — Additional Info:** appears after the first run, prompting only for values not found in your documents (e.g. charitable contributions, estimated payments).
+
+**Config file (optional):** if you use the CLI or want to save your settings for repeat use, upload a `tax_profile.yaml` at the top of Step 1. See [`config/tax_profile.yaml`](config/tax_profile.yaml) for an annotated example.
 
 ### Config-driven mode (recommended for repeat use)
 
@@ -131,9 +141,16 @@ Available filing statuses: `single`, `married_jointly`, `married_separately`, `h
 
 ---
 
-## Configuration
+## Configuration (optional)
 
-Create a YAML file to describe your tax situation. The tool uses it to fill in data that can't be extracted from documents (purchase price, carryovers, etc.) and to avoid re-entering your profile each time.
+A config file is **not required** for the Web UI — all fields including rental properties, carryovers, and mortgage balance can be entered directly in the form.
+
+A `tax_profile.yaml` is useful if you:
+- Use the CLI (`python -m src.main --config ...`)
+- Want to save your settings and reuse them each year
+- Have multiple rental properties or complex carryover situations
+
+Create a YAML file to describe your tax situation and upload it in the Web UI, or pass it to the CLI:
 
 ```yaml
 tax_year: 2025
@@ -214,7 +231,7 @@ See `config/tax_profile.yaml` for a fuller example.
 - **California Form 540**: CA tax brackets, Mental Health Services Tax, CA-specific deductions (no SALT cap, no state income tax deduction), renter's credit
 - **New York IT-201**: NY state and NYC tax calculation
 - **PDF form output**: Fills and saves the actual IRS 1040 and CA 540 PDF forms
-- **Web UI**: Browser interface with manual entry, folder scanning, drag-and-drop upload, and downloadable report
+- **Web UI**: Self-contained browser interface — enter profile, rental properties, carryovers, and mortgage balance directly in the form; drag-and-drop or folder-path document input; Step 3 auto-prompts for anything not found in documents
 
 ---
 
