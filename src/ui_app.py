@@ -643,7 +643,7 @@ INDEX_HTML = """
       </div>
       <div class="yaml-upload-top">
         <label style="font-weight:600;font-size:0.93rem">Config file <span style="font-weight:400;color:#64748b;font-size:0.88rem">— optional, but recommended for repeat use</span></label>
-        <p class="hint" style="margin-bottom:0.35rem">Upload a <code style="background:#eee;padding:0.1rem 0.3rem;border-radius:3px">tax_profile.yaml</code> to pre-fill carryovers, mortgage balance, rental properties, and other saved settings. Without it, fill in the fields below manually.</p>
+        <p class="hint" style="margin-bottom:0.35rem">Upload a <code style="background:#eee;padding:0.1rem 0.3rem;border-radius:3px">tax_profile.yaml</code> to pre-fill carryovers, mortgage balance, rental properties, and other saved settings. Without it, fill in the fields below manually. See <a href="https://github.com/yingxuan/tax-return-tool/blob/main/config/tax_profile.yaml" target="_blank" style="color:#3b82f6">config/tax_profile.yaml</a> in the repo for an annotated example.</p>
         <input type="file" name="config_file" accept=".yaml,.yml" style="font-size:0.9rem">
       </div>
       <div class="field-row">
