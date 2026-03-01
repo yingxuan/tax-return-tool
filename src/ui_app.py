@@ -788,18 +788,6 @@ INDEX_HTML = """
     advancedArrow.classList.toggle('open');
   });
 
-  /* Show/hide spouse SSN based on filing status */
-  const filingStatus = document.getElementById('filingStatus');
-  const spouseSsnRow = document.getElementById('spouseSsnRow');
-  const spouseDobField = document.getElementById('spouseDobField');
-  function updateSpouseRow() {
-    const v = filingStatus.value;
-    const show = (v === 'married_jointly' || v === 'married_separately');
-    spouseSsnRow.style.display = show ? '' : 'none';
-    spouseDobField.style.display = show ? '' : 'none';
-  }
-  filingStatus.addEventListener('change', updateSpouseRow);
-  updateSpouseRow();
 
   const droppedFiles = [];
   const ALLOWED_EXT = new Set(['.pdf','.csv','.xlsx','.xls','.jpg','.jpeg','.png','.tiff','.tif','.bmp']);
