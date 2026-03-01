@@ -1,187 +1,248 @@
 # Tax Return Tool
 
-A Python-based tax calculation tool that reads tax documents, extracts data, and calculates Federal and California state taxes for tax years 2024 and 2025.
+A local, privacy-first tax calculator that reads your actual tax documents (W-2s, 1099s, 1098s, etc.) and computes your Federal (Form 1040) and state taxes for **2024 and 2025**.
 
-## Features
+> **100% offline.** No documents, OCR results, or tax data ever leave your machine. You can disconnect from the internet before running it.
 
-- **YAML Configuration**: Define your taxpayer profile, filing status, dependents, and document folder in a single config file
-- **Document Scanning**: Recursively scan a local folder with folder-aware categorization of tax documents
-- **Document Parsing**: Extract text from PDFs, images (via OCR), and spreadsheets (CSV/Excel)
-- **Tax Data Extraction**: Identify and extract data from W-2, 1099-INT, 1099-DIV, 1099-NEC, 1099-R, and 1098 forms
-- **Federal Tax (Form 1040)**: Full calculation with standard or itemized deductions, qualified dividend rates, child tax credit, self-employment tax, and capital loss carryover
-- **California Tax (Form 540)**: California brackets including Mental Health Services Tax, CA-specific itemized deductions (no SALT cap, excludes state income tax), and renter's credit
-- **Schedule E**: Rental property income/expenses with 27.5-year straight-line depreciation (mid-month convention)
-- **Schedule A**: Itemized deductions with federal SALT cap ($10K), mortgage interest (debt limit proration), CA vehicle license fee deduction, and charitable contributions
-- **Estimated Tax Payments**: Track quarterly federal and California estimated payments
-- **Dependent Care FSA**: Form 2441 dependent care benefit tracking
-- **Report Generator**: Detailed tax summary report printed to console
-- **Web UI**: Browser-based interface (Flask) for manual input, folder scanning, and file upload with drag-and-drop support
+---
 
-## Installation
+## Quick Start
 
-1. Clone or download this repository
-
-2. Create a virtual environment (recommended):
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# 1. Clone
+git clone https://github.com/yingxuan/tax-return-tool.git
+cd tax-return-tool
+
+# 2. Install everything (Tesseract OCR + Python packages)
+make install
+
+# 3. Launch the browser UI
+make web
 ```
 
-3. Install dependencies:
+Then open **http://localhost:5000** in your browser.
+
+> **Windows users:** `make install` installs Python packages automatically. For Tesseract, download and run the installer from https://github.com/UB-Mannheim/tesseract/wiki, then re-run `make web`.
+
+---
+
+## What It Does
+
+Point it at a folder of tax documents and it:
+
+1. Scans PDFs, images (via OCR), and spreadsheets
+2. Identifies and extracts data from W-2, 1099, and 1098 forms
+3. Runs the full Federal (1040) and state tax calculation
+4. Outputs a detailed tax summary report
+5. Optionally fills out the actual IRS/CA PDF forms
+
+**Supported states:** California (Form 540), New York (IT-201). Other states show withholding totals only.
+
+---
+
+## Installation (detailed)
+
+### Python packages
+
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Install Tesseract OCR (required for image processing):
-   - Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
-   - macOS: `brew install tesseract`
-   - Linux: `sudo apt-get install tesseract-ocr`
+### Tesseract OCR
+
+Required for processing image files and scanned PDFs.
+
+| OS | Command |
+|----|---------|
+| macOS | `brew install tesseract` |
+| Linux (Debian/Ubuntu) | `sudo apt-get install tesseract-ocr` |
+| Windows | [Download installer](https://github.com/UB-Mannheim/tesseract/wiki) |
+
+`make install` handles the macOS and Linux steps automatically.
+
+### Virtual environment (recommended)
+
+```bash
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+make install
+```
+
+---
+
+## Usage
+
+### Web UI (easiest)
+
+```bash
+make web          # or: python -m src.ui_app
+```
+
+Open http://localhost:5000. Supports manual entry, folder scanning, and drag-and-drop file upload. No config file required.
+
+### Config-driven mode (recommended for repeat use)
+
+Create a `config/tax_profile.yaml` (see [Configuration](#configuration) below), then:
+
+```bash
+python -m src.main --config config/tax_profile.yaml
+```
+
+### Demo mode (no documents needed)
+
+```bash
+make demo         # or: python -m src.main --demo
+```
+
+Runs a full calculation with built-in sample data: married filing jointly, two dependents, W-2 income, investments, and a rental property.
+
+### Other CLI options
+
+```bash
+# Scan a local folder of documents
+python -m src.main --local-folder path/to/tax/docs
+
+# Process specific files
+python -m src.main --files w2.pdf 1099-div.pdf
+
+# Override config values from the command line
+python -m src.main --config tax_profile.yaml --filing-status single --tax-year 2024
+```
+
+Available filing statuses: `single`, `married_jointly`, `married_separately`, `head_of_household`
+
+---
 
 ## Configuration
 
-Create a YAML config file (see `config/tax_profile.yaml`):
+Create a YAML file to describe your tax situation. The tool uses it to fill in data that can't be extracted from documents (purchase price, carryovers, etc.) and to avoid re-entering your profile each time.
 
 ```yaml
 tax_year: 2025
 
 taxpayer:
-  name: "John & Jane"
-  filing_status: married_jointly
+  name: "Jane & John Doe"
+  filing_status: married_jointly   # single | married_jointly | married_separately | head_of_household
   age: 42
   is_ca_resident: true
   is_renter: false
-  dependents: [Emily, Michael]
+  dependents:
+    - name: "Alice Doe"
+      age: 8
+      relationship: "daughter"
 
-document_folder: "C:\\path\\to\\tax\\documents"
+# Folder containing your tax documents (PDFs, images, spreadsheets)
+document_folder: "/path/to/tax/documents"
 
-# 1098 forms with lender names matching these keywords are treated as rental mortgage
-rental_1098_keywords: ["rental lender name"]
+# Capital loss carryover from prior year (up to $3,000 deductible per year)
+short_term_loss_carryover: 0
+long_term_loss_carryover: 0
 
-# Capital loss carryover from prior year (applied up to $3,000 per year)
-capital_loss_carryover: 0
+# Prior-year passive activity loss carryover (Form 8582)
+pal_carryover: 0
 
-# Outstanding mortgage principal on personal residence (for $750K/$1M debt limit)
-# Set to 0 to skip proration (e.g. if balance is under $750K)
+# Outstanding mortgage balance on primary residence
+# Used to prorate deductible interest when balance exceeds $750K ($1M for pre-2018 loans)
+# Set to 0 to skip proration
 personal_mortgage_balance: 0
+
+# Cash charitable contributions not captured in documents
+charitable_contributions: 0
+
+# Federal and CA estimated tax payments made during the year
+federal_estimated_payments: 0
+ca_estimated_payments: 0
+
+# Rental properties (Schedule E)
+# property_tax and insurance are auto-extracted from documents when possible
+rental_properties:
+  - address: "123 Rental St, Sunnyvale, CA 94087"
+    property_type: "Single Family"
+    purchase_price: 900000
+    purchase_date: "2018-06-01"
+    land_value: 180000        # Purchase price minus depreciable basis
+    rental_income: 36000      # Annual gross rent (if not in documents)
+    other_expenses: 0         # Miscellaneous expenses not in documents
 ```
 
-## Usage
+See `config/tax_profile.yaml` for a fuller example.
 
-### Web UI
+---
 
-Launch the browser-based interface:
-```bash
-python -m src.ui_app
-```
-Then open http://localhost:5000. The UI supports manual data entry, local folder scanning, and file upload via drag-and-drop.
+## Supported Documents
 
-### Config-Driven Mode (Recommended)
+| Form | Description | Extracted Fields |
+|------|-------------|-----------------|
+| **W-2** | Wages & withholding | Box 1, 2, 12, 16, 17 |
+| **1099-INT** | Interest income | Box 1, 4 |
+| **1099-DIV** | Dividends | Box 1a, 1b, 2a, 4 |
+| **1099-NEC** | Self-employment income | Box 1 |
+| **1099-R** | Retirement distributions | Box 1, 2a, 4 |
+| **1098** | Mortgage interest | Box 1, 5, 10; rental auto-tagged by property address |
+| **1099-B / Composite** | Brokerage sales | Proceeds, basis, gain/loss |
+| **Property tax bill** | Real estate taxes | Amount, parcel address |
+| **Home insurance** | Insurance premium | Annual premium |
+| **Vehicle registration** | CA vehicle license fee | Deductible fee amount |
 
-Process tax documents using a YAML config file:
-```bash
-python -m src.main --config config/tax_profile.yaml
-```
+**File formats:** PDF (text), PDF (scanned/image via OCR), JPEG, PNG, TIFF, BMP, CSV, Excel (.xlsx/.xls)
 
-The config file specifies the taxpayer profile, document folder, and other settings. Documents are scanned, categorized, parsed, and tax calculations run automatically.
+---
 
-### Run Demo Mode
+## Features
 
-Run with comprehensive sample data (MFJ, 2 kids, W-2s, investments, rental property, itemized deductions):
-```bash
-python -m src.main --demo
-```
+- **Federal Form 1040**: Standard or itemized deductions, qualified dividend tax rates, child tax credit, self-employment tax, capital loss carryover
+- **Schedule A**: SALT cap ($10K federal), mortgage interest with debt-limit proration, CA vehicle license fee, charitable contributions
+- **Schedule E**: Rental income/expenses, 27.5-year straight-line depreciation (mid-month convention), passive activity loss carryover
+- **California Form 540**: CA tax brackets, Mental Health Services Tax, CA-specific deductions (no SALT cap, no state income tax deduction), renter's credit
+- **New York IT-201**: NY state and NYC tax calculation
+- **PDF form output**: Fills and saves the actual IRS 1040 and CA 540 PDF forms
+- **Web UI**: Browser interface with manual entry, folder scanning, drag-and-drop upload, and downloadable report
 
-### Process a Local Folder
-
-Scan a folder recursively for tax documents:
-```bash
-python -m src.main --local-folder path/to/tax/docs
-```
-
-### Process Specific Files
-
-Process individual tax documents:
-```bash
-python -m src.main --files path/to/w2.pdf path/to/1099.pdf
-```
-
-### Watch a Directory
-
-Scan and categorize documents in a directory:
-```bash
-python -m src.main --watch path/to/tax/docs
-```
-
-### CLI Overrides
-
-Override config settings from the command line:
-```bash
-python -m src.main --config config/tax_profile.yaml --filing-status single --tax-year 2024
-```
-
-Available filing statuses: `single`, `married_jointly`, `married_separately`, `head_of_household`
-
-Supported tax years: `2024`, `2025`
-
-## Supported Document Types
-
-| Document Type | Extension | Method |
-|--------------|-----------|--------|
-| PDF | .pdf | pdfplumber text extraction |
-| JPEG | .jpg, .jpeg | Tesseract OCR |
-| PNG | .png | Tesseract OCR |
-| TIFF | .tiff, .tif | Tesseract OCR |
-| BMP | .bmp | Tesseract OCR |
-| CSV | .csv | pandas |
-| Excel | .xlsx, .xls | pandas + openpyxl |
-
-## Supported Tax Forms
-
-- **W-2**: Wage and Tax Statement
-- **1099-INT**: Interest Income
-- **1099-DIV**: Dividends and Distributions (including qualified dividends and capital gains)
-- **1099-NEC**: Nonemployee Compensation
-- **1099-R**: Distributions from Pensions, Annuities, Retirement Plans
-- **1098**: Mortgage Interest Statement (auto-tagged as personal or rental via config keywords)
+---
 
 ## Project Structure
 
 ```
 tax-return-tool/
 ├── config/
-│   └── tax_profile.yaml      # Taxpayer profile configuration
+│   └── tax_profile.yaml        # Example taxpayer profile
 ├── src/
-│   ├── __init__.py
-│   ├── main.py               # Main entry point & CLI
-│   ├── config_loader.py      # YAML config loader
-│   ├── document_parser.py    # Document parsing (PDF/images/Excel)
-│   ├── data_extractor.py     # Tax data extraction from documents
-│   ├── file_watcher.py       # Folder scanning & document categorization
-│   ├── models.py             # Data models (TaxReturn, forms, etc.)
-│   ├── federal_tax.py        # Federal tax calculation (Form 1040)
-│   ├── california_tax.py     # California tax calculation (Form 540)
-│   ├── schedule_e.py         # Schedule E (rental property income)
-│   ├── schedule_a.py         # Schedule A (itemized deductions)
-│   ├── report_generator.py   # Tax report output
-│   └── ui_app.py             # Flask web UI
-├── test_tax_calculation.py   # Tax calculation tests
+│   ├── main.py                 # CLI entry point
+│   ├── ui_app.py               # Flask web UI
+│   ├── config_loader.py        # YAML config parsing
+│   ├── models.py               # Data models (TaxReturn, W2, 1099, etc.)
+│   ├── document_parser.py      # PDF / image / spreadsheet parsing
+│   ├── data_extractor.py       # Tax form data extraction (regex + logic)
+│   ├── file_watcher.py         # Folder scanning & document categorization
+│   ├── federal_tax.py          # Form 1040 calculation
+│   ├── california_tax.py       # Form 540 calculation
+│   ├── state_tax.py            # NY IT-201 and other state calculations
+│   ├── schedule_a.py           # Itemized deductions
+│   ├── schedule_e.py           # Rental property income
+│   ├── form_filler.py          # PDF form filling (pypdf)
+│   └── report_generator.py     # Tax summary report
+├── pdf_templates/              # Blank IRS / CA PDF forms
+├── Makefile                    # make install / make web / make demo
 ├── requirements.txt
 └── README.md
 ```
 
+---
+
 ## Testing
 
-Run the test suite:
 ```bash
-python test_tax_calculation.py
+make test    # or: python test_tax_calculation.py
 ```
+
+---
 
 ## Limitations
 
-- OCR accuracy depends on document quality
-- Complex tax situations (AMT, foreign income, multiple states) may require manual adjustments
-- This tool is for reference only and does not constitute tax advice
+- OCR accuracy depends on document scan quality
+- Complex situations (AMT, foreign income, multiple states) may need manual adjustment
+- Supported states are California and New York; other states show withholding only
 
 ## Disclaimer
 
-This tool is provided for educational and reference purposes only. It is not a substitute for professional tax advice. Tax laws are complex and subject to change. Always consult a qualified tax professional for your specific situation.
+For educational and reference purposes only. Not a substitute for professional tax advice. Always verify results and consult a qualified tax professional for your situation.
