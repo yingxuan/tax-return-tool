@@ -229,14 +229,6 @@ def _detect_missing(tax_return, config=None) -> dict:
     if ca_est == 0:
         missing.append("ca_estimated_payments")
 
-    # Capital loss carryover (never auto-extracted; only prompt if not already provided)
-    has_carryover = config and (
-        config.short_term_loss_carryover > 0
-        or config.long_term_loss_carryover > 0
-        or config.capital_loss_carryover > 0
-    )
-    if not has_carryover:
-        missing.append("capital_loss_carryover")
 
     # Rental 1098: if multiple 1098s and none tagged rental, warn but don't block
     # (auto-matching uses rental_properties addresses; add property to config if needed)
@@ -659,6 +651,16 @@ INDEX_HTML = """
       <div class="checkbox-row">
         <label><input type="checkbox" name="is_renter"> Renter (for CA Renter's Credit)</label>
       </div>
+      <div class="field-row" style="margin-top:0.6rem">
+        <div>
+          <label>Prior-year ST capital loss carryover <span class="label-hint">- Schedule D, short-term</span></label>
+          <input type="number" name="short_term_loss_carryover" step="0.01" value="0" min="0">
+        </div>
+        <div>
+          <label>Prior-year LT capital loss carryover <span class="label-hint">- Schedule D, long-term</span></label>
+          <input type="number" name="long_term_loss_carryover" step="0.01" value="0" min="0">
+        </div>
+      </div>
     </div>
 
     <!-- Step 2: Documents -->
@@ -723,18 +725,6 @@ INDEX_HTML = """
       <div class="field-wrap" data-field="ca_estimated_payments">
         <label>CA estimated tax paid</label>
         <input type="number" name="ca_estimated_payments" step="0.01" value="0">
-      </div>
-      <div class="field-wrap" data-field="capital_loss_carryover">
-        <label>Capital loss carryover from prior year <span class="label-hint">- applied up to $3,000/yr</span></label>
-        <input type="number" name="capital_loss_carryover" step="0.01" value="0">
-      </div>
-      <div class="field-wrap" data-field="short_term_loss_carryover">
-        <label>Short-term loss carryover <span class="label-hint">- overrides single total above when set</span></label>
-        <input type="number" name="short_term_loss_carryover" step="0.01" value="0">
-      </div>
-      <div class="field-wrap" data-field="long_term_loss_carryover">
-        <label>Long-term loss carryover</label>
-        <input type="number" name="long_term_loss_carryover" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="pal_carryover">
         <label>PAL carryover <span class="label-hint">- prior-year passive activity loss (Form 8582)</span></label>
