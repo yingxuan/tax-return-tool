@@ -128,21 +128,25 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     doc_folder = (form.get("document_folder") or "").strip()
     if doc_folder:
         config.document_folder = doc_folder
-    config.capital_loss_carryover = _float(form, "capital_loss_carryover", config.capital_loss_carryover)
-    config.short_term_loss_carryover = _float(form, "short_term_loss_carryover", config.short_term_loss_carryover)
-    config.long_term_loss_carryover = _float(form, "long_term_loss_carryover", config.long_term_loss_carryover)
-    config.pal_carryover = _float(form, "pal_carryover", config.pal_carryover)
-    config.personal_mortgage_balance = _float(form, "personal_mortgage_balance", config.personal_mortgage_balance)
-    config.us_treasury_interest = _float(form, "us_treasury_interest", config.us_treasury_interest)
-    config.charitable_contributions = _float(form, "charitable_contributions", config.charitable_contributions)
-    config.ca_misc_deductions = _float(form, "ca_misc_deductions", config.ca_misc_deductions)
-    config.federal_estimated_payments = _float(form, "federal_estimated_payments", config.federal_estimated_payments)
-    config.ca_estimated_payments = _float(form, "ca_estimated_payments", config.ca_estimated_payments)
-    config.federal_withheld_adjustment = _float(form, "federal_withheld_adjustment", config.federal_withheld_adjustment)
-    config.other_income = _float(form, "other_income", config.other_income)
-    config.qualified_dividends = _float(form, "qualified_dividends", config.qualified_dividends)
-    config.ordinary_dividends = _float(form, "ordinary_dividends", config.ordinary_dividends)
-    config.primary_property_tax = _float(form, "primary_property_tax", config.primary_property_tax)
+    # For numeric fields: only override the YAML value when the form sends a non-zero value.
+    # HTML inputs default to value="0", so a "0" submission means "user didn't change it".
+    def _fov(key, current):  # float override: keep current if form sends 0
+        return _float(form, key) or current
+    config.capital_loss_carryover = _fov("capital_loss_carryover", config.capital_loss_carryover)
+    config.short_term_loss_carryover = _fov("short_term_loss_carryover", config.short_term_loss_carryover)
+    config.long_term_loss_carryover = _fov("long_term_loss_carryover", config.long_term_loss_carryover)
+    config.pal_carryover = _fov("pal_carryover", config.pal_carryover)
+    config.personal_mortgage_balance = _fov("personal_mortgage_balance", config.personal_mortgage_balance)
+    config.us_treasury_interest = _fov("us_treasury_interest", config.us_treasury_interest)
+    config.charitable_contributions = _fov("charitable_contributions", config.charitable_contributions)
+    config.ca_misc_deductions = _fov("ca_misc_deductions", config.ca_misc_deductions)
+    config.federal_estimated_payments = _fov("federal_estimated_payments", config.federal_estimated_payments)
+    config.ca_estimated_payments = _fov("ca_estimated_payments", config.ca_estimated_payments)
+    config.federal_withheld_adjustment = _fov("federal_withheld_adjustment", config.federal_withheld_adjustment)
+    config.other_income = _fov("other_income", config.other_income)
+    config.qualified_dividends = _fov("qualified_dividends", config.qualified_dividends)
+    config.ordinary_dividends = _fov("ordinary_dividends", config.ordinary_dividends)
+    config.primary_property_tax = _fov("primary_property_tax", config.primary_property_tax)
     apn = (form.get("primary_home_apn") or "").strip()
     if apn:
         config.primary_home_apn = apn
