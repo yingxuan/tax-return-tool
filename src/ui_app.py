@@ -240,11 +240,6 @@ def _detect_missing(tax_return, config=None) -> dict:
     elif not sa or sa.real_estate_taxes == 0:
         missing.append("primary_property_tax")
 
-    # Mortgage balance (only relevant if there's a mortgage)
-    has_mortgage = any(not f.is_rental for f in tax_return.form_1098)
-    if has_mortgage and (not sa or sa.mortgage_balance == 0):
-        missing.append("personal_mortgage_balance")
-
     # Estimated payments
     fed_est = sum(p.amount for p in tax_return.estimated_payments if p.jurisdiction == "federal")
     ca_est = sum(p.amount for p in tax_return.estimated_payments if p.jurisdiction == "california")
@@ -681,11 +676,11 @@ INDEX_HTML = """
           </select>
         </div>
         <div style="max-width:130px">
-          <label># Children under 17 <span class="label-hint">(Child Tax Credit)</span></label>
+          <label># Children under 17</label>
           <input type="number" name="num_children" value="2" min="0" max="20">
         </div>
         <div style="max-width:130px">
-          <label># Other dependents <span class="label-hint">($500 credit each)</span></label>
+          <label># Other dependents</label>
           <input type="number" name="num_other_dependents" value="0" min="0" max="20">
         </div>
       </div>
@@ -694,12 +689,20 @@ INDEX_HTML = """
       </div>
       <div class="field-row" style="margin-top:0.6rem">
         <div>
-          <label>Short-term capital loss carryover <span class="label-hint">(from prior year, Schedule D)</span></label>
+          <label>Short-term capital loss carryover</label>
           <input type="number" name="short_term_loss_carryover" step="0.01" value="0" min="0">
         </div>
         <div>
-          <label>Long-term capital loss carryover <span class="label-hint">(from prior year, Schedule D)</span></label>
+          <label>Long-term capital loss carryover</label>
           <input type="number" name="long_term_loss_carryover" step="0.01" value="0" min="0">
+        </div>
+      </div>
+      <p class="hint" style="margin-top:0.4rem">If you had investment losses in prior years that exceeded your gains, the unused portion carries forward. Check last year's Schedule D (or your CPA's carryover worksheet) for these amounts.</p>
+      <div class="field-row" style="margin-top:0.75rem">
+        <div>
+          <label>Remaining mortgage balance on PRIMARY home</label>
+          <input type="number" name="personal_mortgage_balance" step="0.01" value="0" min="0">
+          <p class="hint">Outstanding principal as of year-end. Used to prorate deductible interest if balance exceeds $750K.</p>
         </div>
       </div>
     </div>
@@ -760,10 +763,6 @@ INDEX_HTML = """
       <div class="field-wrap" data-field="primary_property_tax">
         <label>Primary home property tax paid</label>
         <input type="number" name="primary_property_tax" step="0.01" value="0">
-      </div>
-      <div class="field-wrap" data-field="personal_mortgage_balance">
-        <label>Mortgage balance on primary home <span class="label-hint">(used to prorate interest if over $750K)</span></label>
-        <input type="number" name="personal_mortgage_balance" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="federal_estimated_payments">
         <label>Federal estimated tax payments made</label>
