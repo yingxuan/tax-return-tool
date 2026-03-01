@@ -179,7 +179,7 @@ def _clean_1098_display_address(property_address: str, lender_name: str) -> str:
     return addr
 
 
-def _detect_missing(tax_return) -> dict:
+def _detect_missing(tax_return, config=None) -> dict:
     """Return missing field keys and any extra metadata (e.g. 1098 lender options)."""
     missing = []
     extras = {}
@@ -213,8 +213,14 @@ def _detect_missing(tax_return) -> dict:
     if ca_est == 0:
         missing.append("ca_estimated_payments")
 
-    # Capital loss carryover (never auto-extracted)
-    missing.append("capital_loss_carryover")
+    # Capital loss carryover (never auto-extracted; only prompt if not already provided)
+    has_carryover = config and (
+        config.short_term_loss_carryover > 0
+        or config.long_term_loss_carryover > 0
+        or config.capital_loss_carryover > 0
+    )
+    if not has_carryover:
+        missing.append("capital_loss_carryover")
 
     # Rental 1098: if multiple 1098s and none tagged rental, warn but don't block
     # (auto-matching uses rental_properties addresses; add property to config if needed)
@@ -287,7 +293,7 @@ def run():
 
         report = generate_full_report(tax_return)
         report_html = generate_full_report_html(tax_return)
-        info = _detect_missing(tax_return)
+        info = _detect_missing(tax_return, config=config)
 
         # Cache TaxReturn and determine available PDF forms
         token = uuid.uuid4().hex
