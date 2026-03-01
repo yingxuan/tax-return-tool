@@ -61,6 +61,26 @@ def _dependents_from_form(form) -> list:
     return deps
 
 
+def _rentals_from_form(form) -> list:
+    """Parse rental_N_* form fields into RentalPropertyConfig list (up to 10 properties)."""
+    from .config_loader import RentalPropertyConfig
+    rentals = []
+    for i in range(10):
+        addr = (form.get(f"rental_{i}_address") or "").strip()
+        if not addr:
+            continue
+        rentals.append(RentalPropertyConfig(
+            address=addr,
+            property_type=(form.get(f"rental_{i}_property_type") or "Single Family").strip(),
+            purchase_price=_float(form, f"rental_{i}_purchase_price"),
+            purchase_date=(form.get(f"rental_{i}_purchase_date") or "").strip(),
+            land_value=_float(form, f"rental_{i}_land_value"),
+            rental_income=_float(form, f"rental_{i}_rental_income"),
+            other_expenses=_float(form, f"rental_{i}_other_expenses"),
+        ))
+    return rentals
+
+
 def config_from_form(form) -> TaxProfileConfig:
     """Build TaxProfileConfig from form data; defaults match config_loader."""
     document_folder = (form.get("document_folder") or "").strip() or None
@@ -100,7 +120,7 @@ def config_from_form(form) -> TaxProfileConfig:
         ordinary_dividends=_float(form, "ordinary_dividends"),
         primary_property_tax=_float(form, "primary_property_tax"),
         primary_home_apn=(form.get("primary_home_apn") or "").strip(),
-        rental_properties=[],
+        rental_properties=_rentals_from_form(form),
     )
 
 
@@ -162,6 +182,10 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
     apn = (form.get("primary_home_apn") or "").strip()
     if apn:
         config.primary_home_apn = apn
+    # Rental properties: form entries override YAML when present
+    form_rentals = _rentals_from_form(form)
+    if form_rentals:
+        config.rental_properties = form_rentals
     return config
 
 
@@ -581,6 +605,22 @@ INDEX_HTML = """
     /* YAML config upload */
     .yaml-upload { margin-top: 0.75rem; }
     .yaml-upload input[type="file"] { font-size: 0.88rem; }
+    .yaml-upload-top { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
+                       padding: 0.8rem 1rem; margin-bottom: 0.9rem; }
+
+    /* Rental property blocks */
+    .rental-block { border: 1px solid #d1fae5; border-radius: 8px; padding: 0.9rem 1rem;
+                    margin-bottom: 0.75rem; background: #f0fdf4; }
+    .rental-block-header { display: flex; align-items: center; justify-content: space-between;
+                           margin-bottom: 0.65rem; }
+    .rental-block-title { font-weight: 600; font-size: 0.95rem; color: #065f46; }
+    .rental-remove-btn { font-size: 0.8rem; color: #dc2626; background: none; border: none;
+                         cursor: pointer; padding: 0.1rem 0.4rem; border-radius: 4px; }
+    .rental-remove-btn:hover { background: #fee2e2; }
+    .rental-add-btn { background: none; border: 1px dashed #6ee7b7; color: #059669;
+                      border-radius: 6px; padding: 0.5rem 1rem; font-size: 0.9rem;
+                      cursor: pointer; width: 100%; margin-top: 0.25rem; }
+    .rental-add-btn:hover { background: #d1fae5; }
 
     /* Print styles */
     @media print { .banner, .run-btn, .report-toolbar, .drop-zone, .step:not(#step3) { display: none !important; }
@@ -609,6 +649,11 @@ INDEX_HTML = """
       <div class="step-header">
         <span class="step-num">1</span>
         <span class="step-title">Your Profile</span>
+      </div>
+      <div class="yaml-upload-top">
+        <label style="font-weight:600;font-size:0.93rem">Tax profile config (recommended)</label>
+        <p class="hint" style="margin-bottom:0.35rem">Upload your <code style="background:#eee;padding:0.1rem 0.3rem;border-radius:3px">tax_profile.yaml</code> to apply capital loss carryovers, mortgage balance, PAL carryover, rental properties, and other settings. Without it, those values default to zero.</p>
+        <input type="file" name="config_file" accept=".yaml,.yml" style="font-size:0.9rem">
       </div>
       <div class="field-row">
         <div>
@@ -661,6 +706,17 @@ INDEX_HTML = """
           <input type="number" name="long_term_loss_carryover" step="0.01" value="0" min="0">
         </div>
       </div>
+    </div>
+
+    <!-- Rental Properties -->
+    <div class="step">
+      <div class="step-header">
+        <span class="step-num" style="background:linear-gradient(135deg,#059669,#10b981)">R</span>
+        <span class="step-title">Rental Properties <span class="label-hint" style="font-size:0.88rem;font-weight:400;color:#64748b">(Schedule E — optional)</span></span>
+      </div>
+      <p class="hint" style="margin-bottom:0.75rem">Add each rental property you own. Purchase price, date, and land value are required to compute 27.5-year straight-line depreciation. Insurance, property tax, management fees, and repairs are auto-extracted from your documents.</p>
+      <div id="rentalList"></div>
+      <button type="button" class="rental-add-btn" id="addRentalBtn">+ Add Rental Property</button>
     </div>
 
     <!-- Step 2: Documents -->
@@ -758,13 +814,6 @@ INDEX_HTML = """
           <label>CA miscellaneous deductions <span class="label-hint">- gross amount, before 2% AGI floor</span></label>
           <input type="number" name="ca_misc_deductions" step="0.01" value="0">
         </div>
-        <div class="field-group">
-          <div class="field-group-title">YAML Config</div>
-          <p class="hint">Load a <code style="background:#eee;padding:0.1rem 0.3rem;border-radius:3px">tax_profile.yaml</code> to prefill all fields including rental properties and dependents.</p>
-          <div class="yaml-upload">
-            <input type="file" name="config_file" accept=".yaml,.yml">
-          </div>
-        </div>
       </div>
     </div>
 
@@ -807,6 +856,48 @@ INDEX_HTML = """
     advancedSection.classList.toggle('open');
     advancedArrow.classList.toggle('open');
   });
+
+  /* Rental property add/remove */
+  let rentalCount = 0;
+  function addRentalProperty(prefill) {
+    const idx = rentalCount++;
+    const div = document.createElement('div');
+    div.className = 'rental-block';
+    div.id = 'rental_block_' + idx;
+    div.innerHTML =
+      '<div class="rental-block-header">' +
+        '<span class="rental-block-title">Property ' + (idx + 1) + '</span>' +
+        '<button type="button" class="rental-remove-btn">Remove</button>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div style="flex:2"><label>Address</label>' +
+          '<input type="text" name="rental_' + idx + '_address" placeholder="123 Main St, City, CA 94000" value="' + (prefill && prefill.address ? prefill.address : '') + '"></div>' +
+        '<div><label>Property Type</label>' +
+          '<select name="rental_' + idx + '_property_type">' +
+            '<option value="Single Family">Single Family</option>' +
+            '<option value="Multi-Family">Multi-Family</option>' +
+            '<option value="Condo">Condo</option>' +
+            '<option value="Other">Other</option>' +
+          '</select></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div><label>Purchase Price ($)</label>' +
+          '<input type="number" name="rental_' + idx + '_purchase_price" step="1" min="0" value="' + (prefill && prefill.purchase_price ? prefill.purchase_price : '') + '"></div>' +
+        '<div><label>Purchase Date</label>' +
+          '<input type="date" name="rental_' + idx + '_purchase_date" value="' + (prefill && prefill.purchase_date ? prefill.purchase_date : '') + '"></div>' +
+        '<div><label>Land Value ($) <span class="label-hint">not depreciable</span></label>' +
+          '<input type="number" name="rental_' + idx + '_land_value" step="1" min="0" value="' + (prefill && prefill.land_value ? prefill.land_value : '') + '"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div><label>Annual Rental Income ($) <span class="label-hint">if not in documents</span></label>' +
+          '<input type="number" name="rental_' + idx + '_rental_income" step="0.01" min="0" value="' + (prefill && prefill.rental_income ? prefill.rental_income : '') + '"></div>' +
+        '<div><label>Other Expenses ($) <span class="label-hint">gardening, phone, etc.</span></label>' +
+          '<input type="number" name="rental_' + idx + '_other_expenses" step="0.01" min="0" value="' + (prefill && prefill.other_expenses ? prefill.other_expenses : '0') + '"></div>' +
+      '</div>';
+    document.getElementById('rentalList').appendChild(div);
+    div.querySelector('.rental-remove-btn').addEventListener('click', () => div.remove());
+  }
+  document.getElementById('addRentalBtn').addEventListener('click', () => addRentalProperty());
 
 
   const droppedFiles = [];
