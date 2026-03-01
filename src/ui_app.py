@@ -18,7 +18,7 @@ from pathlib import Path
 from flask import Flask, request, render_template_string, jsonify, send_file
 
 # Import existing pipeline; no changes to these modules
-from .config_loader import load_config, TaxProfileConfig, US_STATES
+from .config_loader import load_config, TaxProfileConfig, DependentConfig, US_STATES
 from .form_filler import fill_form, get_template_path, _auto_select_forms as auto_select_forms
 from .field_mappings import get_mapper
 from .main import process_tax_documents, process_tax_return
@@ -51,6 +51,16 @@ def _int(form, key: str, default: int = 0) -> int:
         return default
 
 
+def _dependents_from_form(form) -> list:
+    """Build synthetic DependentConfig list from num_children / num_other_dependents counts."""
+    deps = []
+    for i in range(_int(form, "num_children")):
+        deps.append(DependentConfig(name=f"Child {i+1}", age=10, relationship="child"))
+    for i in range(_int(form, "num_other_dependents")):
+        deps.append(DependentConfig(name=f"Dependent {i+1}", age=25, relationship="other"))
+    return deps
+
+
 def config_from_form(form) -> TaxProfileConfig:
     """Build TaxProfileConfig from form data; defaults match config_loader."""
     document_folder = (form.get("document_folder") or "").strip() or None
@@ -72,7 +82,7 @@ def config_from_form(form) -> TaxProfileConfig:
         state_of_residence=state_of_residence,
         is_ca_resident=(state_of_residence == "CA"),
         is_renter=form.get("is_renter") in ("true", "1", "on", "yes"),
-        dependents=[],
+        dependents=_dependents_from_form(form),
         document_folder=document_folder,
         capital_loss_carryover=_float(form, "capital_loss_carryover"),
         short_term_loss_carryover=_float(form, "short_term_loss_carryover"),
@@ -116,6 +126,8 @@ def _apply_form_overrides(config: TaxProfileConfig, form) -> TaxProfileConfig:
         config.state_of_residence = so
     config.is_ca_resident = config.state_of_residence == "CA"
     config.is_renter = form.get("is_renter") in ("true", "1", "on", "yes")
+    if not config.dependents:
+        config.dependents = _dependents_from_form(form)
     dob = (form.get("date_of_birth") or "").strip()
     if dob:
         config.date_of_birth = dob
@@ -634,6 +646,14 @@ INDEX_HTML = """
           <select name="state_of_residence">
             {{ state_options | safe }}
           </select>
+        </div>
+        <div style="max-width:130px">
+          <label>Children under 17 <span class="label-hint">- Child Tax Credit</span></label>
+          <input type="number" name="num_children" value="0" min="0" max="20">
+        </div>
+        <div style="max-width:130px">
+          <label>Other dependents <span class="label-hint">- $500 credit each</span></label>
+          <input type="number" name="num_other_dependents" value="0" min="0" max="20">
         </div>
       </div>
       <div class="checkbox-row">
