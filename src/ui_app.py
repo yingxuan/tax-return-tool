@@ -1015,48 +1015,6 @@ INDEX_HTML = """
         step3Hint.textContent = 'These items were not found in your documents. Fill in any that apply, then re-run.';
       }
     }
-    // Populate lender radio options if provided
-    if (data.lender_options) {
-      const container = document.getElementById('lenderOptions');
-      const hidden = document.getElementById('rental1098Hidden');
-      container.innerHTML = '';
-      data.lender_options.forEach((opt, i) => {
-        const label = document.createElement('label');
-        label.className = 'lender-option';
-        const radio = document.createElement('input');
-        radio.type = 'radio'; radio.name = '_lender_pick'; radio.value = opt.lender;
-        const detail = document.createElement('span');
-        detail.className = 'lender-detail';
-        const amt = Number(opt.interest).toLocaleString('en-US', {style:'currency', currency:'USD'});
-        var primary = opt.display_label || opt.lender;
-        detail.innerHTML = '<span class="lender-name">' + primary + '</span>'
-          + ' <span class="lender-amt">' + String.fromCharCode(8211) + ' ' + amt + ' interest</span>';
-        label.appendChild(radio);
-        label.appendChild(detail);
-        container.appendChild(label);
-        radio.addEventListener('change', () => {
-          hidden.value = opt.lender;
-          container.querySelectorAll('.lender-option').forEach(l => l.classList.remove('selected'));
-          label.classList.add('selected');
-        });
-      });
-      // "None" option
-      const noneLabel = document.createElement('label');
-      noneLabel.className = 'lender-none';
-      const noneRadio = document.createElement('input');
-      noneRadio.type = 'radio'; noneRadio.name = '_lender_pick'; noneRadio.value = '';
-      const noneText = document.createElement('span');
-      noneText.className = 'lender-detail';
-      noneText.innerHTML = '<span class="lender-name">None of these are rental</span>';
-      noneLabel.appendChild(noneRadio);
-      noneLabel.appendChild(noneText);
-      container.appendChild(noneLabel);
-      noneRadio.addEventListener('change', () => {
-        hidden.value = '';
-        container.querySelectorAll('.lender-option,.lender-none').forEach(l => l.classList.remove('selected'));
-        noneLabel.classList.add('selected');
-      });
-    }
     // Populate parcel radio options if provided
     if (data.parcel_options) {
       const container = document.getElementById('parcelOptions');
