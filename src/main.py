@@ -1099,6 +1099,15 @@ def main():
         TaxDocumentWatcher.print_summary(summary)
         return
 
+    print("\n  ------------------------------------------------------------")
+    print("  PRIVACY NOTICE")
+    print("  ------------------------------------------------------------")
+    print("  All processing runs 100% locally on your machine.")
+    print("  No documents, OCR results, or tax data are sent anywhere.")
+    print("  For extra assurance, you may disconnect from the internet")
+    print("  before running this command.")
+    print("  ------------------------------------------------------------\n")
+
     if args.demo:
         tax_return = run_demo()
         if args.pdf:
@@ -1117,15 +1126,6 @@ def main():
             print(f"  Tax year: {config.tax_year}")
             if config.document_folder:
                 print(f"  Document folder: {config.document_folder}")
-
-    print("\n  ------------------------------------------------------------")
-    print("  PRIVACY NOTICE")
-    print("  ------------------------------------------------------------")
-    print("  All processing runs 100% locally on your machine.")
-    print("  No documents, OCR results, or tax data are sent anywhere.")
-    print("  For extra assurance, you may disconnect from the internet")
-    print("  before running this command.")
-    print("  ------------------------------------------------------------\n")
 
     # Process documents
     tax_return = process_tax_documents(
