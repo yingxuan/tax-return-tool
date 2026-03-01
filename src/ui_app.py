@@ -632,16 +632,12 @@ INDEX_HTML = """
   <div class="banner">
     <div class="banner-row">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a4.5 4.5 0 00-4.5 4.5V7H3a1 1 0 00-1 1v6a1 1 0 001 1h10a1 1 0 001-1V8a1 1 0 00-1-1h-.5V5.5A4.5 4.5 0 008 1zm0 1.5A3 3 0 0111 5.5V7H5V5.5A3 3 0 018 2.5z" fill="#2a7a2a"/></svg>
-      <span>Everything runs locally. Your data and documents never leave your computer.</span>
-    </div>
-    <div class="banner-row">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2a7a2a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0119 12.55"/><path d="M5 12.55a10.94 10.94 0 015.17-2.39"/><path d="M10.71 5.05A16 16 0 0122.56 9"/><path d="M1.42 9a15.91 15.91 0 014.7-2.88"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
-      <span>Want extra assurance? Disconnect from the internet before uploading any documents — the tool works fully offline.</span>
+      <span>100% local &amp; private — your documents never leave your computer. Works offline.</span>
     </div>
   </div>
 
   <h1>Tax Return Tool</h1>
-  <p class="subtitle">Calculate Federal (1040) and state taxes. State tax is calculated for California (Form 540) and New York (IT-201); other states show residency and W-2 withholding.</p>
+  <p class="subtitle">Federal (1040) + state taxes for 2024 &amp; 2025. Full support for California and New York; other states show withholding totals.</p>
 
   <form id="form">
     <!-- Step 1: Profile -->
@@ -651,8 +647,8 @@ INDEX_HTML = """
         <span class="step-title">Your Profile</span>
       </div>
       <div class="yaml-upload-top">
-        <label style="font-weight:600;font-size:0.93rem">Tax profile config (recommended)</label>
-        <p class="hint" style="margin-bottom:0.35rem">Upload your <code style="background:#eee;padding:0.1rem 0.3rem;border-radius:3px">tax_profile.yaml</code> to apply capital loss carryovers, mortgage balance, PAL carryover, rental properties, and other settings. Without it, those values default to zero.</p>
+        <label style="font-weight:600;font-size:0.93rem">Config file <span style="font-weight:400;color:#64748b;font-size:0.88rem">— optional, but recommended for repeat use</span></label>
+        <p class="hint" style="margin-bottom:0.35rem">Upload a <code style="background:#eee;padding:0.1rem 0.3rem;border-radius:3px">tax_profile.yaml</code> to pre-fill carryovers, mortgage balance, rental properties, and other saved settings. Without it, fill in the fields below manually.</p>
         <input type="file" name="config_file" accept=".yaml,.yml" style="font-size:0.9rem">
       </div>
       <div class="field-row">
@@ -685,24 +681,24 @@ INDEX_HTML = """
           </select>
         </div>
         <div style="max-width:130px">
-          <label>Children under 17 <span class="label-hint">- Child Tax Credit</span></label>
+          <label>Children under 17 <span class="label-hint">(Child Tax Credit)</span></label>
           <input type="number" name="num_children" value="0" min="0" max="20">
         </div>
         <div style="max-width:130px">
-          <label>Other dependents <span class="label-hint">- $500 credit each</span></label>
+          <label>Other dependents <span class="label-hint">($500 credit each)</span></label>
           <input type="number" name="num_other_dependents" value="0" min="0" max="20">
         </div>
       </div>
       <div class="checkbox-row">
-        <label><input type="checkbox" name="is_renter"> Renter (for CA Renter's Credit)</label>
+        <label><input type="checkbox" name="is_renter"> CA renter <span class="label-hint" style="font-weight:400">(Renter's Credit)</span></label>
       </div>
       <div class="field-row" style="margin-top:0.6rem">
         <div>
-          <label>Prior-year ST capital loss carryover <span class="label-hint">- Schedule D, short-term</span></label>
+          <label>Short-term capital loss carryover <span class="label-hint">(from prior year, Schedule D)</span></label>
           <input type="number" name="short_term_loss_carryover" step="0.01" value="0" min="0">
         </div>
         <div>
-          <label>Prior-year LT capital loss carryover <span class="label-hint">- Schedule D, long-term</span></label>
+          <label>Long-term capital loss carryover <span class="label-hint">(from prior year, Schedule D)</span></label>
           <input type="number" name="long_term_loss_carryover" step="0.01" value="0" min="0">
         </div>
       </div>
@@ -711,10 +707,10 @@ INDEX_HTML = """
     <!-- Rental Properties -->
     <div class="step">
       <div class="step-header">
-        <span class="step-num" style="background:linear-gradient(135deg,#059669,#10b981)">R</span>
-        <span class="step-title">Rental Properties <span class="label-hint" style="font-size:0.88rem;font-weight:400;color:#64748b">(Schedule E — optional)</span></span>
+        <span class="step-num" style="background:linear-gradient(135deg,#059669,#10b981);font-size:0.75rem">🏠</span>
+        <span class="step-title">Rental Properties <span class="label-hint" style="font-size:0.88rem;font-weight:400;color:#64748b">(optional)</span></span>
       </div>
-      <p class="hint" style="margin-bottom:0.75rem">Add each rental property you own. Purchase price, date, and land value are required to compute 27.5-year straight-line depreciation. Insurance, property tax, management fees, and repairs are auto-extracted from your documents.</p>
+      <p class="hint" style="margin-bottom:0.75rem">Add each property you rent out. Purchase price, date, and land value are used to calculate annual depreciation. Expenses like insurance, property tax, and management fees are read from your documents automatically.</p>
       <div id="rentalList"></div>
       <button type="button" class="rental-add-btn" id="addRentalBtn">+ Add Rental Property</button>
     </div>
@@ -725,26 +721,22 @@ INDEX_HTML = """
         <span class="step-num">2</span>
         <span class="step-title">Tax Documents</span>
       </div>
-      <p class="hint" style="margin-bottom:0.3rem">Provide your W-2s, 1099s, 1098s, and other tax forms. Supported formats: PDF, CSV, Excel, and images.</p>
-      <p class="hint" style="margin-bottom:0.5rem; color:#2a5a2a;"><strong>Read files on your device only</strong> — nothing is sent to the internet. Select or drop files/folders so this app can read them locally.</p>
-
-      <label><strong>Read files</strong></label>
+      <p class="hint" style="margin-bottom:0.6rem">Drop your W-2s, 1099s, 1098s, and other tax forms. Supported: PDF, images (JPG/PNG), CSV, Excel.</p>
       <div class="drop-zone" id="dropZone">
         <div class="drop-zone-icon">&#128194;</div>
-        <p>Drag and drop files or folders here to read them, or</p>
+        <p>Drag and drop files or a folder here, or</p>
         <div class="browse-links">
           <button type="button" class="link-btn" id="selectFilesBtn">Browse files</button>
           <span style="color:#999">or</span>
           <button type="button" class="link-btn" id="selectFolderBtn">Select folder</button>
         </div>
-        <p class="hint" style="margin-top:0.35rem; font-size:0.8rem;">Browser may ask for folder access — that is only to read files on your computer. Data stays on your device.</p>
-        <p class="hint" style="margin-top:0.25rem; font-size:0.8rem; color:#2a5a2a;"><strong>If the browser shows &quot;Upload&quot;</strong> — that is the browser&apos;s wording only. You are <strong>not</strong> uploading to the internet; this app reads the files locally.</p>
         <input type="file" id="fileInput" multiple accept=".pdf,.csv,.xlsx,.xls,.jpg,.jpeg,.png,.tiff,.tif,.bmp" style="display:none">
         <input type="file" id="folderInput" webkitdirectory directory style="display:none">
         <div class="file-list" id="fileList"></div>
         <div class="file-count" id="fileCount" style="display:none"></div>
       </div>
-
+      <div class="or-divider">or scan a folder path</div>
+      <input type="text" name="document_folder" placeholder="C:\\Users\\you\\Documents\\Tax2025" style="margin-top:0">
     </div>
 
     <!-- Step 3: Additional Info (hidden until first run) -->
@@ -756,12 +748,12 @@ INDEX_HTML = """
       <p class="hint" id="step3Hint">These items were not found in your documents. Fill in any that apply, then re-run.</p>
 
       <div class="field-wrap" data-field="charitable_contributions">
-        <label>Charitable contributions <span class="label-hint">- cash donations (Schedule A)</span></label>
+        <label>Cash charitable donations</label>
         <input type="number" name="charitable_contributions" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="primary_home_apn">
         <label>Which property is your primary home?</label>
-        <p class="hint">Multiple properties found on your tax receipt. Select your primary residence; the rest will be treated as rental.</p>
+        <p class="hint">Multiple properties found in your documents. Select your primary residence — the others will be treated as rental.</p>
         <div id="parcelOptions"></div>
         <input type="hidden" name="primary_home_apn" id="primaryApnHidden" value="">
       </div>
@@ -770,48 +762,42 @@ INDEX_HTML = """
         <input type="number" name="primary_property_tax" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="personal_mortgage_balance">
-        <label>Primary home mortgage balance <span class="label-hint">- outstanding principal for $750K limit</span></label>
+        <label>Mortgage balance on primary home <span class="label-hint">(used to prorate interest if over $750K)</span></label>
         <input type="number" name="personal_mortgage_balance" step="0.01" value="0">
-        <p class="hint">Set to 0 if your balance is under $750K.</p>
       </div>
       <div class="field-wrap" data-field="federal_estimated_payments">
-        <label>Federal estimated tax paid</label>
+        <label>Federal estimated tax payments made</label>
         <input type="number" name="federal_estimated_payments" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="ca_estimated_payments">
-        <label>CA estimated tax paid</label>
+        <label>California estimated tax payments made</label>
         <input type="number" name="ca_estimated_payments" step="0.01" value="0">
       </div>
       <div class="field-wrap" data-field="pal_carryover">
-        <label>PAL carryover <span class="label-hint">- prior-year passive activity loss (Form 8582)</span></label>
+        <label>Rental passive loss carryover <span class="label-hint">(prior-year unallowed loss, Form 8582)</span></label>
         <input type="number" name="pal_carryover" step="0.01" value="0">
       </div>
       <button type="button" class="toggle-btn" id="advancedToggle">
         <span class="toggle-arrow" id="advancedArrow">&#9654;</span>
-        <span>All other overrides</span>
+        <span>Advanced overrides</span>
       </button>
       <div class="collapsible" id="advancedSection">
         <div class="field-group">
-          <div class="field-group-title">Document Folder Path</div>
-          <label>Scan a local folder instead <span class="label-hint">- scanned recursively</span></label>
-          <input type="text" name="document_folder" placeholder="C:\\Users\\you\\Documents\\Tax2025">
-        </div>
-        <div class="field-group">
-          <div class="field-group-title">Income Adjustments</div>
-          <label>Other income <span class="label-hint">- 1099-MISC Box 3, jury duty, etc.</span></label>
+          <div class="field-group-title">Income corrections</div>
+          <label>Other income <span class="label-hint">(1099-MISC, jury duty, etc. — added on top of extracted)</span></label>
           <input type="number" name="other_income" step="0.01" value="0">
-          <label>Qualified dividends override <span class="label-hint">- 1099-DIV Box 1b total (if extraction is low)</span></label>
+          <label>Qualified dividends <span class="label-hint">(override if extraction missed some 1099-DIV Box 1b)</span></label>
           <input type="number" name="qualified_dividends" step="0.01" value="0">
-          <label>Ordinary dividends override <span class="label-hint">- 1099-DIV Box 1a total (if extraction is low)</span></label>
+          <label>Ordinary dividends <span class="label-hint">(override if extraction missed some 1099-DIV Box 1a)</span></label>
           <input type="number" name="ordinary_dividends" step="0.01" value="0">
-          <label>US Treasury interest <span class="label-hint">- exempt from CA state tax</span></label>
+          <label>US Treasury interest <span class="label-hint">(excluded from California income)</span></label>
           <input type="number" name="us_treasury_interest" step="0.01" value="0">
-          <label>Federal withholding adjustment <span class="label-hint">- correction to auto-extracted amount</span></label>
+          <label>Federal withholding correction <span class="label-hint">(add/subtract from auto-extracted W-2 withholding)</span></label>
           <input type="number" name="federal_withheld_adjustment" step="0.01" value="0">
         </div>
         <div class="field-group">
-          <div class="field-group-title">California-specific</div>
-          <label>CA miscellaneous deductions <span class="label-hint">- gross amount, before 2% AGI floor</span></label>
+          <div class="field-group-title">California only</div>
+          <label>CA miscellaneous deductions <span class="label-hint">(gross amount, before 2% AGI floor)</span></label>
           <input type="number" name="ca_misc_deductions" step="0.01" value="0">
         </div>
       </div>
@@ -885,13 +871,13 @@ INDEX_HTML = """
           '<input type="number" name="rental_' + idx + '_purchase_price" step="1" min="0" value="' + (prefill && prefill.purchase_price ? prefill.purchase_price : '') + '"></div>' +
         '<div><label>Purchase Date</label>' +
           '<input type="date" name="rental_' + idx + '_purchase_date" value="' + (prefill && prefill.purchase_date ? prefill.purchase_date : '') + '"></div>' +
-        '<div><label>Land Value ($) <span class="label-hint">not depreciable</span></label>' +
+        '<div><label>Land Value ($) <span class="label-hint">(not depreciable)</span></label>' +
           '<input type="number" name="rental_' + idx + '_land_value" step="1" min="0" value="' + (prefill && prefill.land_value ? prefill.land_value : '') + '"></div>' +
       '</div>' +
       '<div class="field-row">' +
-        '<div><label>Annual Rental Income ($) <span class="label-hint">if not in documents</span></label>' +
+        '<div><label>Annual Rental Income ($) <span class="label-hint">(if not in documents)</span></label>' +
           '<input type="number" name="rental_' + idx + '_rental_income" step="0.01" min="0" value="' + (prefill && prefill.rental_income ? prefill.rental_income : '') + '"></div>' +
-        '<div><label>Other Expenses ($) <span class="label-hint">gardening, phone, etc.</span></label>' +
+        '<div><label>Other Expenses ($) <span class="label-hint">(gardening, misc)</span></label>' +
           '<input type="number" name="rental_' + idx + '_other_expenses" step="0.01" min="0" value="' + (prefill && prefill.other_expenses ? prefill.other_expenses : '0') + '"></div>' +
       '</div>';
     document.getElementById('rentalList').appendChild(div);
