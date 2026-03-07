@@ -58,7 +58,16 @@ federal_estimated_payments: 0
 ca_estimated_payments: 0
 
 # Correction to auto-extracted federal withholding (positive adds, negative subtracts)
+# Use only if OCR misreads a W-2 or a document is missing from the folder.
 # federal_withheld_adjustment: 0
+
+# Override auto-extracted dividend totals (use if a 1099-DIV document is missing/corrupt)
+# ordinary_dividends: 0
+# qualified_dividends: 0
+
+# CA-only misc deductions subject to 2% AGI floor (investment expenses, tax prep fees)
+# Usually zero at high incomes due to the floor. Rarely needed.
+# ca_misc_deductions: 0
 
 # Prior-year passive activity loss carryover (Form 8582)
 # pal_carryover: 0
