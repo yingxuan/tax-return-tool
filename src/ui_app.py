@@ -211,7 +211,7 @@ def _clean_1098_display_address(property_address: str, lender_name: str) -> str:
     )
     lower = addr.lower()
     if any(p in lower for p in placeholder_patterns):
-        # Try to extract real address from parentheses, e.g. "address and telephone number (10886 LINDA VISTA DR)"
+        # Try to extract real address from parentheses, e.g. "address and telephone number (123 MAIN ST)"
         m = re.search(r"\(([^)]{5,})\)", addr)
         if m:
             return m.group(1).strip()

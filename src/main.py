@@ -681,7 +681,7 @@ def process_tax_documents(
             for ext in extracted_rentals:
                 ext_addr = ext.address.lower()
                 # Match if any significant word from the extracted property name
-                # appears in the config address (e.g. "Hiawatha" in both)
+                # appears in the config address (e.g. "Maple" in both)
                 ext_words = [w for w in ext_addr.split() if len(w) > 3]
                 if any(w in addr_lower for w in ext_words) or not ext_addr:
                     if ext.repairs > 0:

@@ -486,7 +486,7 @@ def test_rental_vs_personal_mortgage():
         income=TaxableIncome(wages=200_000),
         form_1098=[
             Form1098(lender_name="Wells Fargo", mortgage_interest=18_000, is_rental=False),
-            Form1098(lender_name="Hiawatha Mortgage", mortgage_interest=33_000, is_rental=True),
+            Form1098(lender_name="Rental Property Mortgage", mortgage_interest=33_000, is_rental=True),
         ],
     )
 
