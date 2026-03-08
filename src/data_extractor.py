@@ -674,7 +674,7 @@ class TaxDataExtractor:
         )
         if addr and not any(kw in addr.lower() for kw in placeholder_keywords):
             return addr
-        # Search for a line that looks like: 123 Rental St, Anytown, CA, 94087
+        # Search for a line that looks like: 123 Rental St, Anytown, CA, 90210
         us_addr_pattern = re.compile(
             r"(\d{1,6}\s+[^\n,]+,\s*[A-Za-z\s\.]+,\s*[A-Z]{2}\s*,?\s*\d{5}(?:-\d{4})?)",
             re.IGNORECASE,

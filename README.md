@@ -191,7 +191,7 @@ ca_estimated_payments: 0
 # Rental properties (Schedule E)
 # property_tax and insurance are auto-extracted from documents when possible
 rental_properties:
-  - address: "123 Rental St, Sunnyvale, CA 94087"
+  - address: "123 Rental St, Anytown, CA 90210"
     property_type: "Single Family"
     purchase_price: 900000
     purchase_date: "2018-06-01"
