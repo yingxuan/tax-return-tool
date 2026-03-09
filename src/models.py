@@ -199,8 +199,8 @@ class RentalProperty:
 
     @property
     def depreciable_basis(self) -> float:
-        """Calculate the depreciable basis (purchase price minus land value)."""
-        return max(0, self.purchase_price - self.land_value)
+        """Calculate the depreciable basis: 2/3 of purchase price (building portion)."""
+        return self.purchase_price * 2 / 3
 
     @property
     def total_expenses(self) -> float:

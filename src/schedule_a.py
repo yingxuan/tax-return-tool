@@ -23,8 +23,8 @@ MEDICAL_AGI_FLOOR_RATE = 0.075  # 7.5% of AGI
 # Mortgage acquisition debt limits (TCJA: post-Dec 15, 2017 mortgages)
 FEDERAL_MORTGAGE_DEBT_LIMIT = 750_000
 FEDERAL_MORTGAGE_DEBT_LIMIT_MFS = 375_000
-CA_MORTGAGE_DEBT_LIMIT = 1_000_000  # CA did not conform to TCJA reduction
-CA_MORTGAGE_DEBT_LIMIT_MFS = 500_000
+CA_MORTGAGE_DEBT_LIMIT = 1_100_000  # CA pre-TCJA: $1M acquisition + $100K home equity
+CA_MORTGAGE_DEBT_LIMIT_MFS = 550_000
 
 # ---------------------------------------------------------------------------
 # CA Itemized Deduction Limitation (high-income phaseout)

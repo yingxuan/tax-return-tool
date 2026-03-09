@@ -339,11 +339,14 @@ def process_tax_documents(
             elif result.form_type == '1099-B':
                 form = result.data
                 tax_return.form_1099_b.append(form)
+                # Wash sale disallowed is a positive adjustment (IRS Form 8949 col g):
+                # reportable gain = proceeds - cost + wash_sale_disallowed
+                reportable_gain = form.gain_loss + form.wash_sale_disallowed
                 if form.is_short_term:
-                    income.short_term_capital_gains += form.gain_loss
+                    income.short_term_capital_gains += reportable_gain
                 else:
-                    income.long_term_capital_gains += form.gain_loss
-                income.capital_gains += form.gain_loss
+                    income.long_term_capital_gains += reportable_gain
+                income.capital_gains += reportable_gain
             elif result.form_type == '1099-R':
                 form = result.data
                 tax_return.form_1099_r.append(form)
@@ -611,7 +614,7 @@ def process_tax_documents(
                 f"should be entered as 2700000, not 270000000. ***"
                 f"\n  *** Current value causes mortgage interest to be prorated "
                 f"to {750_000 / balance * 100:.2f}% (federal) / "
-                f"{1_000_000 / balance * 100:.2f}% (CA). ***\n"
+                f"{1_100_000 / balance * 100:.2f}% (CA). ***\n"
             )
 
         if not tax_return.schedule_a_data:
@@ -808,9 +811,9 @@ def _print_ingestion_summary(tax_return: TaxReturn, config) -> None:
         print(f"\n  Mortgage balance (config): {fmt(bal)}")
         if bal > 750_000:
             fed_pct = 750_000 / bal * 100
-            ca_pct = min(1_000_000 / bal, 1.0) * 100
+            ca_pct = min(1_100_000 / bal, 1.0) * 100
             print(f"  Federal proration:         {fed_pct:.2f}%  -> {fmt(pers_int * 750_000 / bal)}")
-            print(f"  CA proration:              {ca_pct:.2f}%  -> {fmt(pers_int * min(1_000_000 / bal, 1.0))}")
+            print(f"  CA proration:              {ca_pct:.2f}%  -> {fmt(pers_int * min(1_100_000 / bal, 1.0))}")
 
     # Capital loss carryover
     if hasattr(tax_return, '_capital_loss_carryover_applied') and tax_return._capital_loss_carryover_applied > 0:

@@ -2011,6 +2011,48 @@ class TaxDataExtractor:
                     lt_gain += gl
                     lt_fed_wh += fw
 
+        # --- Fallback: Robinhood/USBA "Total Short-term X X X X X" summary table ---
+        # Format: "Total Short-term <proceeds> <cost> <mkt_disc> <wash> <gain>"
+        # (5 columns, no fed-withheld column; used by Robinhood and US Bancorp brokerage)
+        if st_proceeds == 0 and lt_proceeds == 0:
+            _TOTAL_ROW_5 = (
+                r'Total\s+{term}-term'
+                r'\s+([\d,]+\.\d{{2}})'   # proceeds
+                r'\s+([\d,]+\.\d{{2}})'   # cost basis
+                r'\s+([\d,]+\.\d{{2}})'   # market discount
+                r'\s+([\d,]+\.\d{{2}})'   # wash sales
+                r'\s+(-?[\d,]+\.\d{{2}})' # gain/loss
+            )
+            for term, is_short in [('Short', True), ('Long', False)]:
+                pat = _TOTAL_ROW_5.format(term=term)
+                m = re.search(pat, text)
+                if m:
+                    p = self._parse_amount(m.group(1))
+                    b = self._parse_amount(m.group(2))
+                    md = self._parse_amount(m.group(3))
+                    ws = self._parse_amount(m.group(4))
+                    gl = self._parse_amount(m.group(5))
+                    if is_short:
+                        st_proceeds, st_basis, st_discount, st_wash, st_gain = p, b, md, ws, gl
+                    else:
+                        lt_proceeds, lt_basis, lt_discount, lt_wash, lt_gain = p, b, md, ws, gl
+
+        # --- Fallback: Schwab noncovered "Total Short-Term Realized Gain or (Loss) $X $X -- $X" ---
+        # Format: proceeds, cost, "--" for wash, gain (no mkt_disc column)
+        if st_proceeds == 0 and lt_proceeds == 0:
+            m = re.search(
+                r'Total\s+Short-Term\s+Realized\s+Gain\s+or\s+\(Loss\)'
+                r'\s*\$\s*([\d,]+\.\d{2})'   # proceeds
+                r'\s*\$\s*([\d,]+\.\d{2})'   # cost
+                r'\s+--'                       # wash (none)
+                r'\s*\$\s*([\d,]+\.\d{2})',   # gain
+                text,
+            )
+            if m:
+                st_proceeds = self._parse_amount(m.group(1))
+                st_basis = self._parse_amount(m.group(2))
+                st_gain = self._parse_amount(m.group(3))
+
         # --- Fallback: Box A / Box D realized gain/loss lines ---
         # (Robinhood format and Fidelity per-section TOTALS pages)
         if st_proceeds == 0 and lt_proceeds == 0:

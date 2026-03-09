@@ -12,3 +12,7 @@ pdf_templates/**/*.pdf
 
 # Generated output
 output/
+
+# Personal tax data / CPA comparison files (contain real financial data)
+compare_with_cpa.py
+docs/2024_CPA_vs_tool_comparison.md
